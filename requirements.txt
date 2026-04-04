@@ -1,0 +1,9 @@
+aiogram
+SQLAlchemy
+asyncpg
+alembic
+apscheduler
+pydantic-settings
+python-dotenv
+httpx
+orjson

@@ -1,0 +1,18 @@
+version: "3.9"
+
+services:
+  db:
+    image: postgres:16
+    container_name: vpn-bot-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: vpn_bot
+      POSTGRES_USER: vpn
+      POSTGRES_PASSWORD: vpn
+    ports:
+      - "5432:5432"
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+
+volumes:
+  pg_data:
