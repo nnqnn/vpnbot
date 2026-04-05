@@ -5,6 +5,7 @@
 ## Что реализовано
 
 - Telegram-бот на `aiogram` с inline-кнопками
+- Онбординг-доступ: обязательная подписка на канал + принятие правил/политики
 - PostgreSQL + ORM (`SQLAlchemy`)
 - Баланс в рублях и раздельная логика:
   - пополнение баланса
@@ -171,8 +172,10 @@ docker-compose.yml
 - список пользователей
 - баланс пользователя
 - выдать/снять дни
+- выдать дни всем пользователям
 - бан/разбан
 - выдать бонус (дни + деньги)
+- массовая рассылка всем пользователям
 
 ## Установка и запуск
 
@@ -193,6 +196,13 @@ cp .env.example .env
 - `TELEGAPAY_API_KEY`
 - `TELEGAPAY_RETURN_URL` (можно на бота в Telegram)
 - `PAYMENT_POLL_INTERVAL_SECONDS=60`
+
+Минимально для онбординга пользователей:
+
+- `REQUIRED_CHANNEL` (например `@kvpnpublic`)
+- `REQUIRED_CHANNEL_URL`
+- `RULES_URL`
+- `SUPPORT_URL`
 
 ## 2) PostgreSQL
 

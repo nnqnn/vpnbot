@@ -51,6 +51,7 @@ class User(Base):
 
     inviter: Mapped["User | None"] = relationship(remote_side=[id], backref="invitees")
     payments: Mapped[list["Payment"]] = relationship(back_populates="user", cascade="all, delete-orphan")
+    policy: Mapped["UserPolicy | None"] = relationship(back_populates="user", uselist=False, cascade="all, delete-orphan")
 
 
 class Payment(Base):
@@ -78,3 +79,16 @@ class Referral(Base):
     invited_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False, index=True)
     bonus_applied: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
+class UserPolicy(Base):
+    __tablename__ = "user_policies"
+    __table_args__ = (UniqueConstraint("user_id", name="uq_user_policies_user_id"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False, index=True)
+    accepted_terms: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    accepted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    user: Mapped[User] = relationship(back_populates="policy")

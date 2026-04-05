@@ -27,7 +27,7 @@ class UserService:
         telegram_id: int,
         username: str | None,
         start_param: str | None = None,
-    ) -> tuple[User, bool]:
+    ) -> tuple[User, bool, int | None]:
         user_repo = UserRepository(session)
         referral_repo = ReferralRepository(session)
 
@@ -35,12 +35,13 @@ class UserService:
         if user:
             if username and user.username != username:
                 user.username = username
-            return user, False
+            return user, False, None
 
         inviter = await self._resolve_inviter(session, start_param=start_param, telegram_id=telegram_id)
         referral_code = await self._generate_unique_referral_code(session)
         now = utc_now()
         expiration = now + timedelta(days=self.settings.trial_days)
+        inviter_telegram_id: int | None = None
         user = await user_repo.create(
             telegram_id=telegram_id,
             username=username,
@@ -57,23 +58,26 @@ class UserService:
             await referral_repo.create(inviter_id=inviter.id, invited_id=user.id, bonus_applied=True)
             self.extend_user_days(inviter, self.settings.referral_bonus_days)
             inviter.warning_sent_at = None
+            inviter_telegram_id = inviter.telegram_id
             if inviter.status == UserStatus.active and not inviter.device_limit_blocked:
                 inviter.vpn_enabled = True
 
         await session.flush()
-        return user, True
+        return user, True, inviter_telegram_id
 
     async def activate_vpn_if_needed(self, user: User) -> None:
         if user.status == UserStatus.banned:
             return
         if user.device_limit_blocked:
             return
+        if not user.expiration_date or user.expiration_date <= utc_now():
+            return
         await self.xray_service.enable_user(user.telegram_id, str(user.uuid))
 
     async def disable_vpn(self, user: User) -> None:
         await self.xray_service.disable_user(user.telegram_id)
 
-    def build_status_text(self, user: User, traffic: tuple[int, int] | None = None) -> str:
+    def build_status_text(self, user: User) -> str:
         if user.status == UserStatus.banned:
             status_text = "🔒 Заблокирован"
         elif user.device_limit_blocked:
@@ -90,18 +94,11 @@ class UserService:
             remaining = "0 дней"
             end_at = "не задано"
 
-        traffic_text = "недоступно"
-        if traffic:
-            up_mb = traffic[0] / 1024 / 1024
-            down_mb = traffic[1] / 1024 / 1024
-            traffic_text = f"⬆️ {up_mb:.1f} MB / ⬇️ {down_mb:.1f} MB"
-
         return (
             f"{status_text}\n"
             f"Срок до: {end_at}\n"
             f"Осталось: {remaining}\n"
-            f"Баланс: {user.balance} ₽\n"
-            f"Трафик: {traffic_text}"
+            f"Баланс: {user.balance} ₽"
         )
 
     def extend_user_days(self, user: User, days: int) -> None:

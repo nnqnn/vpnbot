@@ -58,6 +58,13 @@ class Settings(BaseSettings):
 
     log_level: str = Field(default="INFO", alias="LOG_LEVEL")
     log_dir: Path = Field(default=Path("./logs"), alias="LOG_DIR")
+    required_channel: str = Field(default="@kvpnpublic", alias="REQUIRED_CHANNEL")
+    required_channel_url: str = Field(default="https://t.me/kvpnpublic", alias="REQUIRED_CHANNEL_URL")
+    support_url: str = Field(default="https://t.me/kamilhateu", alias="SUPPORT_URL")
+    rules_url: str = Field(
+        default="https://telegra.ph/Pravila-servisa-kVPN-i-politika-konfidencialnosti-04-05",
+        alias="RULES_URL",
+    )
 
     def is_admin(self, telegram_id: int) -> bool:
         return telegram_id == self.super_admin_id

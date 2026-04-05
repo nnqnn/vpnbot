@@ -6,7 +6,7 @@ from decimal import Decimal
 from sqlalchemy import Select, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.models import Payment, PaymentStatus, Referral, User, UserStatus
+from app.db.models import Payment, PaymentStatus, Referral, User, UserPolicy, UserStatus
 
 
 class UserRepository:
@@ -41,6 +41,11 @@ class UserRepository:
             .limit(limit)
             .offset(offset)
         )
+        result = await self.session.execute(query)
+        return list(result.scalars().all())
+
+    async def list_all_users(self) -> list[User]:
+        query: Select[tuple[User]] = select(User).order_by(User.id.asc())
         result = await self.session.execute(query)
         return list(result.scalars().all())
 
@@ -137,3 +142,33 @@ class ReferralRepository:
         self.session.add(referral)
         await self.session.flush()
         return referral
+
+
+class UserPolicyRepository:
+    def __init__(self, session: AsyncSession) -> None:
+        self.session = session
+
+    async def get_by_user_id(self, user_id: int) -> UserPolicy | None:
+        query: Select[tuple[UserPolicy]] = select(UserPolicy).where(UserPolicy.user_id == user_id)
+        result = await self.session.execute(query)
+        return result.scalar_one_or_none()
+
+    async def is_terms_accepted(self, user_id: int) -> bool:
+        policy = await self.get_by_user_id(user_id)
+        return bool(policy and policy.accepted_terms)
+
+    async def ensure(self, user_id: int) -> UserPolicy:
+        policy = await self.get_by_user_id(user_id)
+        if policy is not None:
+            return policy
+        policy = UserPolicy(user_id=user_id, accepted_terms=False)
+        self.session.add(policy)
+        await self.session.flush()
+        return policy
+
+    async def accept_terms(self, user_id: int) -> UserPolicy:
+        policy = await self.ensure(user_id)
+        policy.accepted_terms = True
+        policy.accepted_at = datetime.now(timezone.utc)
+        await self.session.flush()
+        return policy

@@ -30,6 +30,13 @@ async def _deny_message(message: Message) -> None:
     await message.answer("Недостаточно прав.")
 
 
+async def _notify_user(bot, telegram_id: int, text: str) -> None:
+    try:
+        await bot.send_message(telegram_id, text)
+    except Exception:  # noqa: BLE001
+        return
+
+
 def _status_short(user) -> str:
     if user.status.value == "banned":
         return "banned"
@@ -96,6 +103,16 @@ async def admin_add_days(callback: CallbackQuery, state: FSMContext, settings: S
     await callback.answer()
 
 
+@admin_router.callback_query(F.data == "admin:add_days_all")
+async def admin_add_days_all(callback: CallbackQuery, state: FSMContext, settings: Settings) -> None:
+    if not await _is_admin(callback.from_user.id, settings):
+        await _deny_callback(callback)
+        return
+    await state.set_state(AdminStates.wait_add_days_all)
+    await callback.message.edit_text("Введите количество дней для всех пользователей:", reply_markup=admin_menu())
+    await callback.answer()
+
+
 @admin_router.callback_query(F.data == "admin:remove_days")
 async def admin_remove_days(callback: CallbackQuery, state: FSMContext, settings: Settings) -> None:
     if not await _is_admin(callback.from_user.id, settings):
@@ -103,6 +120,16 @@ async def admin_remove_days(callback: CallbackQuery, state: FSMContext, settings
         return
     await state.set_state(AdminStates.wait_remove_days)
     await callback.message.edit_text("Формат: telegram_id days", reply_markup=admin_menu())
+    await callback.answer()
+
+
+@admin_router.callback_query(F.data == "admin:broadcast")
+async def admin_broadcast(callback: CallbackQuery, state: FSMContext, settings: Settings) -> None:
+    if not await _is_admin(callback.from_user.id, settings):
+        await _deny_callback(callback)
+        return
+    await state.set_state(AdminStates.wait_broadcast_text)
+    await callback.message.edit_text("Введите текст рассылки для всех пользователей:", reply_markup=admin_menu())
     await callback.answer()
 
 
@@ -203,6 +230,82 @@ async def process_add_days(
         return
     await admin_service.add_days(user, days)
     await message.answer(f"Добавлено {days} дней пользователю {telegram_id}.")
+    await _notify_user(
+        message.bot,
+        telegram_id,
+        f"🎁 Администратор выдал вам {days} дополнительных дн. VPN.",
+    )
+    await state.clear()
+
+
+@admin_router.message(AdminStates.wait_add_days_all)
+async def process_add_days_all(
+    message: Message,
+    state: FSMContext,
+    session: AsyncSession,
+    settings: Settings,
+    admin_service: AdminService,
+) -> None:
+    if not await _is_admin(message.from_user.id, settings):
+        await _deny_message(message)
+        return
+    try:
+        days = int(message.text.strip())
+    except ValueError:
+        await message.answer("Нужно целочисленное количество дней.")
+        return
+    if days <= 0:
+        await message.answer("Количество дней должно быть больше 0.")
+        return
+
+    users = await UserRepository(session).list_all_users()
+    changed = 0
+    notified = 0
+    for user in users:
+        await admin_service.add_days(user, days)
+        changed += 1
+        try:
+            await message.bot.send_message(
+                user.telegram_id,
+                f"🎁 Администратор выдал вам {days} дополнительных дн. VPN.",
+            )
+            notified += 1
+        except Exception:  # noqa: BLE001
+            continue
+
+    await message.answer(
+        f"Готово: +{days} дн. выдано {changed} пользователям.\n"
+        f"Уведомления доставлены: {notified}."
+    )
+    await state.clear()
+
+
+@admin_router.message(AdminStates.wait_broadcast_text)
+async def process_broadcast(
+    message: Message,
+    state: FSMContext,
+    session: AsyncSession,
+    settings: Settings,
+) -> None:
+    if not await _is_admin(message.from_user.id, settings):
+        await _deny_message(message)
+        return
+    text = (message.text or "").strip()
+    if not text:
+        await message.answer("Текст рассылки не должен быть пустым.")
+        return
+
+    users = await UserRepository(session).list_all_users()
+    sent = 0
+    failed = 0
+    for user in users:
+        try:
+            await message.bot.send_message(user.telegram_id, text, parse_mode=None)
+            sent += 1
+        except Exception:  # noqa: BLE001
+            failed += 1
+
+    await message.answer(f"Рассылка завершена.\nДоставлено: {sent}\nОшибок: {failed}")
     await state.clear()
 
 
@@ -324,4 +427,10 @@ async def process_bonus(
         return
     await admin_service.grant_bonus(user=user, days=days, amount=amount)
     await message.answer(f"Бонус выдан пользователю {telegram_id}: +{days} дн., +{amount} ₽.")
+    if days > 0:
+        await _notify_user(
+            message.bot,
+            telegram_id,
+            f"🎁 Администратор выдал вам {days} дополнительных дн. VPN.",
+        )
     await state.clear()
