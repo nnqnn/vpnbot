@@ -1,0 +1,24 @@
+[Unit]
+Description=Telegram VPN Bot (Xray VLESS)
+After=network-online.target postgresql.service xray.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+Group=root
+WorkingDirectory=/home/tgvpn
+EnvironmentFile=/home/tgvpn/.env
+ExecStart=/home/tgvpn/.venv/bin/python -m app.main
+Restart=always
+RestartSec=5
+TimeoutStopSec=30
+KillSignal=SIGINT
+StandardOutput=journal
+StandardError=journal
+NoNewPrivileges=true
+PrivateTmp=true
+LimitNOFILE=65535
+
+[Install]
+WantedBy=multi-user.target

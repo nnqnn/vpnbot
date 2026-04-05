@@ -92,7 +92,7 @@ async def admin_add_days(callback: CallbackQuery, state: FSMContext, settings: S
         await _deny_callback(callback)
         return
     await state.set_state(AdminStates.wait_add_days)
-    await callback.message.edit_text("Формат: <telegram_id> <days>", reply_markup=admin_menu())
+    await callback.message.edit_text("Формат: telegram_id days", reply_markup=admin_menu())
     await callback.answer()
 
 
@@ -102,7 +102,7 @@ async def admin_remove_days(callback: CallbackQuery, state: FSMContext, settings
         await _deny_callback(callback)
         return
     await state.set_state(AdminStates.wait_remove_days)
-    await callback.message.edit_text("Формат: <telegram_id> <days>", reply_markup=admin_menu())
+    await callback.message.edit_text("Формат: telegram_id days", reply_markup=admin_menu())
     await callback.answer()
 
 
@@ -133,7 +133,7 @@ async def admin_bonus(callback: CallbackQuery, state: FSMContext, settings: Sett
         return
     await state.set_state(AdminStates.wait_bonus)
     await callback.message.edit_text(
-        "Формат: <telegram_id> <days> <amount_rub>\nПример: 123456789 2 50",
+        "Формат: telegram_id days amount_rub\nПример: 123456789 2 50",
         reply_markup=admin_menu(),
     )
     await callback.answer()
@@ -186,7 +186,7 @@ async def process_add_days(
         return
     payload = message.text.strip().split()
     if len(payload) != 2:
-        await message.answer("Формат: <telegram_id> <days>")
+        await message.answer("Формат: telegram_id days")
         return
     try:
         telegram_id, days = map(int, payload)
@@ -219,7 +219,7 @@ async def process_remove_days(
         return
     payload = message.text.strip().split()
     if len(payload) != 2:
-        await message.answer("Формат: <telegram_id> <days>")
+        await message.answer("Формат: telegram_id days")
         return
     try:
         telegram_id, days = map(int, payload)
@@ -304,7 +304,7 @@ async def process_bonus(
         return
     payload = message.text.strip().split()
     if len(payload) != 3:
-        await message.answer("Формат: <telegram_id> <days> <amount_rub>")
+        await message.answer("Формат: telegram_id days amount_rub")
         return
     try:
         telegram_id = int(payload[0])

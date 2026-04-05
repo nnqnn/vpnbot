@@ -21,9 +21,9 @@ class Settings(BaseSettings):
     referral_bonus_days: int = Field(default=2, alias="REFERRAL_BONUS_DAYS")
     max_devices: int = Field(default=4, alias="MAX_DEVICES")
 
-    yoomoney_wallet: str = Field(alias="YOOMONEY_WALLET")
-    yoomoney_token: str = Field(alias="YOOMONEY_TOKEN")
-    yoomoney_success_url: str = Field(default="", alias="YOOMONEY_SUCCESS_URL")
+    telegapay_base_url: str = Field(alias="TELEGAPAY_BASE_URL")
+    telegapay_api_key: str = Field(alias="TELEGAPAY_API_KEY")
+    telegapay_return_url: str = Field(default="", alias="TELEGAPAY_RETURN_URL")
     payment_min_amount: int = Field(default=100, alias="PAYMENT_MIN_AMOUNT")
     payment_ttl_minutes: int = Field(default=60, alias="PAYMENT_TTL_MINUTES")
 
@@ -44,13 +44,15 @@ class Settings(BaseSettings):
     xray_config_path: Path = Field(default=Path("/usr/local/etc/xray/config.json"), alias="XRAY_CONFIG_PATH")
     xray_inbound_tag: str = Field(default="vless-in", alias="XRAY_INBOUND_TAG")
     xray_reload_command: str = Field(default="systemctl reload xray", alias="XRAY_RELOAD_COMMAND")
+    xray_restart_command: str = Field(default="systemctl restart xray", alias="XRAY_RESTART_COMMAND")
     xray_access_log_path: Path = Field(default=Path("/var/log/xray/access.log"), alias="XRAY_ACCESS_LOG_PATH")
     xray_api_enabled: bool = Field(default=False, alias="XRAY_API_ENABLED")
     xray_api_server: str = Field(default="127.0.0.1:10085", alias="XRAY_API_SERVER")
+    xray_api_timeout_seconds: int = Field(default=5, alias="XRAY_API_TIMEOUT_SECONDS")
     xray_bin_path: str = Field(default="xray", alias="XRAY_BIN_PATH")
 
     auto_renew_interval_minutes: int = Field(default=30, alias="AUTO_RENEW_INTERVAL_MINUTES")
-    payment_poll_interval_seconds: int = Field(default=90, alias="PAYMENT_POLL_INTERVAL_SECONDS")
+    payment_poll_interval_seconds: int = Field(default=60, alias="PAYMENT_POLL_INTERVAL_SECONDS")
     device_limit_interval_minutes: int = Field(default=10, alias="DEVICE_LIMIT_INTERVAL_MINUTES")
     notify_interval_minutes: int = Field(default=30, alias="NOTIFY_INTERVAL_MINUTES")
 

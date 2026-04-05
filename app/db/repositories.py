@@ -81,6 +81,19 @@ class PaymentRepository:
         await self.session.flush()
         return payment
 
+    async def get_by_id(self, payment_id: int) -> Payment | None:
+        query: Select[tuple[Payment]] = select(Payment).where(Payment.id == payment_id)
+        result = await self.session.execute(query)
+        return result.scalar_one_or_none()
+
+    async def get_by_id_for_user(self, payment_id: int, user_id: int) -> Payment | None:
+        query: Select[tuple[Payment]] = select(Payment).where(
+            Payment.id == payment_id,
+            Payment.user_id == user_id,
+        )
+        result = await self.session.execute(query)
+        return result.scalar_one_or_none()
+
     async def pending(self, limit: int = 200) -> list[Payment]:
         query: Select[tuple[Payment]] = (
             select(Payment)

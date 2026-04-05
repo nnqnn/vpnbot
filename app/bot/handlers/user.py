@@ -10,9 +10,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.bot.keyboards import main_menu, payment_link_menu, topup_amounts_menu
 from app.config import Settings
-from app.db.repositories import UserRepository
+from app.db.repositories import PaymentRepository, UserRepository
 from app.services.billing_service import BillingService
-from app.services.payment_service import YooMoneyService
+from app.services.payment_service import PaymentProviderError, TelegaPayService
 from app.services.user_service import UserService
 from app.services.xray_service import XrayService
 
@@ -44,13 +44,13 @@ async def start_handler(
 
     bot_info = await bot.get_me()
     text = (
-        "👋 Добро пожаловать в VPN-бот.\n\n"
-        "Здесь можно пополнять баланс, оплачивать месяцы VPN и получать ссылку VLESS.\n"
+        "👋 Добро пожаловать в kVPN.\n\n"
+        "Здесь лучший VPN по доступной цене\n"
         f"Тариф: {settings.month_price_rub} ₽ / 30 дней."
     )
     if is_new:
         text += f"\n\n🎁 Стартовый бонус: {settings.trial_days} день(дней)."
-    text += f"\n\nРеферальная ссылка: https://t.me/{bot_info.username}?start=ref_{user.referral_code}"
+    text += f"\n\nКАЖДЫЙ ПРИГЛАШЕННЫЙ ПОЛЬЗОВАТЕЛЬ = +{settings.referral_bonus_days} бесплатных дня. Реферальная ссылка: https://t.me/{bot_info.username}?start=ref_{user.referral_code}"
     await message.answer(text, reply_markup=main_menu(is_admin=settings.is_admin(message.from_user.id)))
 
 
@@ -130,7 +130,7 @@ async def topup_create_handler(
     callback: CallbackQuery,
     session: AsyncSession,
     settings: Settings,
-    payment_service: YooMoneyService,
+    payment_service: TelegaPayService,
 ) -> None:
     user = await _get_user(session, callback.from_user.id)
     if user is None:
@@ -143,17 +143,63 @@ async def topup_create_handler(
         await callback.answer(f"Минимальная сумма пополнения: {settings.payment_min_amount} ₽", show_alert=True)
         return
 
-    payment, payment_url = await payment_service.create_payment(user=user, amount_rub=amount)
+    try:
+        payment, payment_url = await payment_service.create_payment(user=user, amount_rub=amount)
+    except (PaymentProviderError, ValueError) as exc:
+        await callback.answer(str(exc), show_alert=True)
+        return
+
     await callback.message.edit_text(
         (
             f"Платеж создан.\n"
             f"Сумма: {amount} ₽\n"
-            f"ID платежа: {payment.id}\n\n"
-            "После оплаты бот автоматически зачислит деньги на баланс."
+            f"ID: {payment.id}\n\n"
+            "1) Перейдите по ссылке и оплатите через СБП.\n"
+            "2) Нажмите «Я оплатил».\n"
+            "Бот также проверяет статус автоматически."
         ),
-        reply_markup=payment_link_menu(payment_url),
+        reply_markup=payment_link_menu(payment_url, payment.id),
     )
     await callback.answer()
+
+
+@user_router.callback_query(F.data.startswith("payment:confirm:"))
+async def payment_confirm_handler(
+    callback: CallbackQuery,
+    session: AsyncSession,
+    settings: Settings,
+    payment_service: TelegaPayService,
+) -> None:
+    payload = callback.data.split(":")
+    if len(payload) != 3:
+        await callback.answer("Некорректный формат подтверждения", show_alert=True)
+        return
+    try:
+        payment_id = int(payload[2])
+    except ValueError:
+        await callback.answer("Некорректный ID платежа", show_alert=True)
+        return
+
+    user = await _get_user(session, callback.from_user.id)
+    if user is None:
+        await callback.answer("Пользователь не найден. Нажмите /start", show_alert=True)
+        return
+
+    payment = await PaymentRepository(session).get_by_id_for_user(payment_id=payment_id, user_id=user.id)
+    if payment is None:
+        await callback.answer("Платеж не найден", show_alert=True)
+        return
+
+    is_paid, text = await payment_service.confirm_pending_payment(payment=payment, user=user)
+    if is_paid:
+        await callback.message.edit_text(
+            text,
+            reply_markup=main_menu(is_admin=settings.is_admin(callback.from_user.id)),
+        )
+        await callback.answer()
+        return
+
+    await callback.answer(text, show_alert=True)
 
 
 @user_router.callback_query(F.data == "menu:vpn_link")

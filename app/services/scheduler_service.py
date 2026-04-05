@@ -10,7 +10,7 @@ from apscheduler.triggers.interval import IntervalTrigger
 from app.config import Settings
 from app.services.billing_service import BillingService
 from app.services.device_limit_service import DeviceLimitService
-from app.services.payment_service import YooMoneyService
+from app.services.payment_service import TelegaPayService
 
 logger = logging.getLogger(__name__)
 
@@ -21,7 +21,7 @@ class SchedulerService:
         settings: Settings,
         bot: Bot,
         billing_service: BillingService,
-        payment_service: YooMoneyService,
+        payment_service: TelegaPayService,
         device_limit_service: DeviceLimitService,
     ) -> None:
         self.settings = settings
