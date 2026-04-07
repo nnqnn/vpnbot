@@ -19,7 +19,9 @@ logger = logging.getLogger(__name__)
 
 class DeviceLimitService:
     EMAIL_PATTERN = re.compile(r"user-(\d+)@vpn\.local")
-    ACCESS_PATTERN = re.compile(r"from\s+(?P<ip>[0-9a-fA-F\.:]+):\d+.*email:(?P<email>[^\s]+)")
+    ACCESS_PATTERN = re.compile(
+        r"from\s+\[?(?P<ip>[0-9a-fA-F\.:]+)\]?:\d+.*email[:=]\s*(?P<email>[^\s,\]]+)"
+    )
 
     def __init__(
         self,
@@ -34,7 +36,10 @@ class DeviceLimitService:
     async def enforce(self, bot: Bot) -> None:
         if self.settings.max_devices <= 0:
             return
-        offending_ids = self._collect_offending_telegram_ids(self.settings.xray_access_log_path, self.settings.max_devices)
+        offending_ids, has_valid_snapshot = await self._collect_offending_telegram_ids()
+        if not has_valid_snapshot:
+            logger.warning("Device-limit check skipped: no valid snapshot from Xray API or access log")
+            return
         if not offending_ids:
             await self._recover_unblocked_users(bot, set())
             return
@@ -58,7 +63,7 @@ class DeviceLimitService:
                     bot,
                     user.telegram_id,
                     (
-                        "🚫 Доступ временно отключен: зафиксировано больше 4 устройств.\n"
+                        f"🚫 Доступ временно отключен: зафиксировано больше {self.settings.max_devices} устройств.\n"
                         "Отключите лишние устройства и подождите до следующей проверки."
                     ),
                 )
@@ -85,11 +90,48 @@ class DeviceLimitService:
                 )
             await session.commit()
 
+    async def _collect_offending_telegram_ids(self) -> tuple[set[int], bool]:
+        if self.settings.xray_api_enabled:
+            api_result = await self._collect_offending_telegram_ids_api()
+            if api_result is not None:
+                return api_result, True
+        log_result = self._collect_offending_telegram_ids_from_logs(
+            self.settings.xray_access_log_path,
+            self.settings.max_devices,
+        )
+        if log_result is None:
+            return set(), False
+        return log_result, True
+
+    async def _collect_offending_telegram_ids_api(self) -> set[int] | None:
+        try:
+            async with self.session_maker() as session:
+                result = await session.execute(
+                    select(User.telegram_id).where(
+                        User.status == UserStatus.active,
+                        User.vpn_enabled.is_(True),
+                    )
+                )
+                telegram_ids = [int(tg_id) for (tg_id,) in result.all()]
+
+            offending_ids: set[int] = set()
+            for telegram_id in telegram_ids:
+                ips = await self.xray_service.get_user_online_ips(telegram_id)
+                if ips is None:
+                    logger.warning("Xray API online IP stats unavailable, fallback to access log mode")
+                    return None
+                if len(ips) > self.settings.max_devices:
+                    offending_ids.add(telegram_id)
+            return offending_ids
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Failed to collect IP stats via Xray API: %s", exc)
+            return None
+
     @classmethod
-    def _collect_offending_telegram_ids(cls, log_path: Path, max_devices: int) -> set[int]:
+    def _collect_offending_telegram_ids_from_logs(cls, log_path: Path, max_devices: int) -> set[int] | None:
         if not log_path.exists():
             logger.warning("Xray access log not found: %s", log_path)
-            return set()
+            return None
 
         ips_by_email: dict[str, set[str]] = defaultdict(set)
         for line in cls._tail(log_path, max_lines=50000):

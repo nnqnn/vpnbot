@@ -87,11 +87,6 @@ class BillingService:
                 else:
                     if user.vpn_enabled:
                         await self._disable_if_needed(user)
-                    await self._safe_send(
-                        bot,
-                        user.telegram_id,
-                        "⛔ VPN отключен: на балансе недостаточно средств для продления.",
-                    )
 
             await session.commit()
 
@@ -129,6 +124,27 @@ class BillingService:
                 if not should_enable and user.vpn_enabled:
                     await self._disable_if_needed(user)
             await session.commit()
+
+    async def sync_xray_runtime_state(self) -> tuple[int, int]:
+        now = utc_now()
+        async with self.session_maker() as session:
+            result = await session.execute(select(User))
+            users = list(result.scalars().all())
+
+        managed_ids = [int(user.telegram_id) for user in users]
+        enabled_users = [
+            (int(user.telegram_id), str(user.uuid))
+            for user in users
+            if (
+                user.status == UserStatus.active
+                and not user.device_limit_blocked
+                and user.expiration_date is not None
+                and user.expiration_date > now
+            )
+        ]
+        await self.xray_service.sync_enabled_users(enabled_users, all_managed_telegram_ids=managed_ids)
+        logger.info("Xray runtime sync done: enabled=%s managed=%s", len(enabled_users), len(managed_ids))
+        return len(enabled_users), len(managed_ids)
 
     async def _disable_if_needed(self, user: User) -> None:
         await self.xray_service.disable_user(user.telegram_id)

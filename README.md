@@ -16,7 +16,7 @@
 - Стартовый триал (+1 день)
 - Админ-панель внутри Telegram (для одного super-admin)
 - Интеграция с Xray через API (`adu/rmu`) или через `config.json`
-- Платежи TelegaPay (создание paylink + polling статуса + кнопка "Я оплатил")
+- Платежи TelegaPay (создание paylink + автоматический polling статуса)
 - Логи приложения и платежей
 
 ## Архитектура
@@ -130,6 +130,9 @@ docker-compose.yml
 `xray api adu/rmu` работает через `HandlerService` и добавляет/удаляет пользователей на лету.  
 Это исключает микродропы, которые неизбежны при `systemctl restart xray`.
 
+Дополнительно бот периодически делает runtime-sync из БД в Xray API (`XRAY_SYNC_INTERVAL_MINUTES`),  
+чтобы после случайного рестарта Xray автоматически восстановить активных пользователей.
+
 Технически бот передает в `adu` временный JSON с inbound `tag` и `clients`, а для удаления использует `rmu -tag=<tag> <email>`.  
 `email` в Xray используется как уникальный идентификатор пользователя (`user-<telegram_id>@vpn.local`).
 
@@ -146,20 +149,26 @@ docker-compose.yml
 В Xray нет идеального штатного лимита "строго 4 устройства" для VLESS.
 В проекте добавлен практичный soft-limit:
 
-- парсинг `XRAY_ACCESS_LOG_PATH`
+- основной режим: `xray api statsonlineiplist --json` (текущие online IP пользователя)
+- резервный fallback: парсинг `XRAY_ACCESS_LOG_PATH`
 - подсчет уникальных IP на пользователя
 - при превышении >4:
   - временно отключается VPN
   - отправляется уведомление
 - при нормализации подключений доступ возвращается
 
+Для API-режима убедитесь, что в конфиге Xray включены:
+- `stats: {}`
+- `policy.levels.0.statsUserOnline: true`
+- `api.services: ["HandlerService", "StatsService"]`
+
+Рекомендуется ставить `DEVICE_LIMIT_INTERVAL_MINUTES=1`, чтобы блокировка срабатывала быстро.
+
 ## Биллинг
 
 - Валюта: RUB
 - Пополнение: TelegaPay `create_paylink` (метод `SBP`)
-- Подтверждение: кнопка `Я оплатил` + endpoint `confirm_payment`
 - Проверка статуса: endpoint `check_status` (каждую минуту)
-- После нажатия `Я оплатил` кнопка скрывается, далее остается только автопроверка статуса
 - Списание:
   - только при явном нажатии `Оплатить месяц`
   - автоматическое продление по cron при истечении, если баланса хватает
@@ -286,6 +295,7 @@ apt-get install -y docker-compose-plugin
 - `XRAY_API_SERVER`
 - `XRAY_API_TIMEOUT_SECONDS`
 - `XRAY_API_ENABLED`
+- `XRAY_SYNC_INTERVAL_MINUTES`
 
 Для `api`-режима пользователю бота нужен доступ к бинарнику `xray` и локальному API-порту.  
 Для `config`-режима дополнительно нужны права на запись `config.json` и reload/restart Xray.
@@ -314,6 +324,27 @@ sudo systemctl enable --now tgvpn-bot
 ```bash
 sudo systemctl status tgvpn-bot
 sudo journalctl -u tgvpn-bot -f
+```
+
+## 6) Аварийный runtime-resync (без restart Xray)
+
+Если нужно массово восстановить пользователей в Xray runtime из БД:
+
+```bash
+cd /home/tgvpn
+source .venv/bin/activate
+python3 scripts/resync_xray_runtime.py
+```
+
+Что делает скрипт:
+- безопасный режим по умолчанию: upsert активных пользователей в runtime;
+- при `--rebuild`: удаляет всех managed пользователей и добавляет обратно активных;
+- не выполняет `systemctl restart xray`.
+
+Для жесткого полного пересбора:
+
+```bash
+python3 scripts/resync_xray_runtime.py --rebuild
 ```
 
 Если изменили `.env` или код:

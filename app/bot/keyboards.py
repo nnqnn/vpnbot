@@ -44,10 +44,9 @@ def admin_menu() -> InlineKeyboardMarkup:
     return kb.as_markup()
 
 
-def payment_link_menu(payment_url: str, payment_id: int) -> InlineKeyboardMarkup:
+def payment_link_menu(payment_url: str) -> InlineKeyboardMarkup:
     kb = InlineKeyboardBuilder()
     kb.button(text="💸 Перейти к оплате", url=payment_url)
-    kb.button(text="✅ Я оплатил", callback_data=f"payment:confirm:{payment_id}")
     kb.button(text="⬅️ Назад", callback_data="menu:back")
     kb.adjust(1)
     return kb.as_markup()

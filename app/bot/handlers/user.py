@@ -18,7 +18,7 @@ from app.bot.keyboards import (
     topup_amounts_menu,
 )
 from app.config import Settings
-from app.db.repositories import PaymentRepository, UserPolicyRepository, UserRepository
+from app.db.repositories import UserPolicyRepository, UserRepository
 from app.services.billing_service import BillingService
 from app.services.payment_service import PaymentProviderError, TelegaPayService
 from app.services.user_service import UserService
@@ -308,55 +308,12 @@ async def topup_create_handler(
             f"Платеж создан.\n"
             f"Сумма: {amount} ₽\n"
             f"ID: {payment.id}\n\n"
-            "1) Перейдите по ссылке и оплатите через СБП.\n"
-            "2) Нажмите «Я оплатил».\n"
-            "Бот также проверяет статус автоматически."
+            "Перейдите по ссылке и оплатите через СБП.\n"
+            "Бот проверяет статус автоматически."
         ),
-        reply_markup=payment_link_menu(payment_url, payment.id),
+        reply_markup=payment_link_menu(payment_url),
     )
     await callback.answer()
-
-
-@user_router.callback_query(F.data.startswith("payment:confirm:"))
-async def payment_confirm_handler(
-    callback: CallbackQuery,
-    session: AsyncSession,
-    settings: Settings,
-    payment_service: TelegaPayService,
-    bot: Bot,
-) -> None:
-    payload = callback.data.split(":")
-    if len(payload) != 3:
-        await callback.answer("Некорректный формат подтверждения", show_alert=True)
-        return
-    try:
-        payment_id = int(payload[2])
-    except ValueError:
-        await callback.answer("Некорректный ID платежа", show_alert=True)
-        return
-
-    user = await _get_user(session, callback.from_user.id)
-    if user is None:
-        await callback.answer("Пользователь не найден. Нажмите /start", show_alert=True)
-        return
-    if not await _ensure_access_for_callback(callback, session, settings, bot, user):
-        return
-
-    payment = await PaymentRepository(session).get_by_id_for_user(payment_id=payment_id, user_id=user.id)
-    if payment is None:
-        await callback.answer("Платеж не найден", show_alert=True)
-        return
-
-    is_paid, text = await payment_service.confirm_pending_payment(payment=payment, user=user)
-    if is_paid:
-        await callback.message.edit_text(
-            text,
-            reply_markup=main_menu(is_admin=settings.is_admin(callback.from_user.id)),
-        )
-        await callback.answer()
-        return
-
-    await callback.answer(text, show_alert=True)
 
 
 @user_router.callback_query(F.data == "menu:vpn_link")

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import copy
 import json
 import logging
 import os
@@ -141,6 +142,39 @@ class XrayService:
             return None
         return (up or 0, down or 0)
 
+    async def get_user_online_ips(self, telegram_id: int) -> set[str] | None:
+        if not self.settings.xray_api_enabled:
+            return None
+
+        email = self.user_email(telegram_id)
+        args = self._api_command("statsonlineiplist")
+        args.extend([f"-email={email}", "--json"])
+        code, stdout, stderr = await self._run_args_command(args)
+        if code != 0:
+            if self._looks_like_not_found_error(stdout, stderr):
+                return set()
+            logger.debug("Online IP query failed for %s: %s", email, stderr.strip() or stdout.strip())
+            return None
+
+        try:
+            payload = json.loads(stdout) if stdout.strip() else {}
+        except json.JSONDecodeError:
+            logger.debug("Online IP query returned non-JSON for %s: %s", email, stdout.strip())
+            return None
+
+        raw_ips = payload.get("ips", {})
+        if isinstance(raw_ips, dict):
+            return {str(ip) for ip in raw_ips.keys()}
+        if isinstance(raw_ips, list):
+            normalized: set[str] = set()
+            for item in raw_ips:
+                if isinstance(item, str):
+                    normalized.add(item)
+                elif isinstance(item, dict) and "ip" in item:
+                    normalized.add(str(item["ip"]))
+            return normalized
+        return set()
+
     async def reload_xray(self) -> None:
         primary_command = self.settings.xray_reload_command.strip()
         code, stdout, stderr = await self._run_shell_command(primary_command)
@@ -212,18 +246,36 @@ class XrayService:
             await self._add_user_via_api_unlocked(email=email, user_uuid=user_uuid)
 
     async def _add_user_via_api_unlocked(self, email: str, user_uuid: str) -> None:
-        payload = {
-            "inbounds": [
-                {
-                    "tag": self.settings.xray_inbound_tag,
-                    "protocol": "vless",
-                    "settings": {
-                        "decryption": "none",
-                        "clients": [self._build_client(user_uuid=user_uuid, email=email)],
-                    },
-                }
-            ]
-        }
+        payload = await asyncio.to_thread(
+            self._build_adu_payload_from_config,
+            email,
+            user_uuid,
+        )
+        code, stdout, stderr = await self._run_adu_with_payload(payload)
+        if code == 0 and self._adu_added_users_count(stdout) > 0:
+            return
+        if self._looks_like_user_exists_error(stdout, stderr):
+            # Replace stale runtime user to enforce DB UUID/flow after crashes or manual drift.
+            logger.warning("Xray API user exists, replacing runtime user: %s", email)
+            await self._remove_user_via_api_unlocked(email=email)
+            retry_code, retry_stdout, retry_stderr = await self._run_adu_with_payload(payload)
+            if retry_code == 0 and self._adu_added_users_count(retry_stdout) > 0:
+                return
+            logger.error(
+                "Xray API replace user failed (%s): %s",
+                retry_code,
+                retry_stderr.strip() or retry_stdout.strip(),
+            )
+            raise RuntimeError("Failed to replace user via Xray API")
+        logger.error(
+            "Xray API add user failed (%s): %s | stdout=%s",
+            code,
+            stderr.strip() or stdout.strip(),
+            stdout.strip(),
+        )
+        raise RuntimeError("Failed to add user via Xray API")
+
+    async def _run_adu_with_payload(self, payload: dict[str, Any]) -> tuple[int, str, str]:
         config_file = await asyncio.to_thread(self._write_temp_json, payload)
         try:
             code, stdout, stderr = await self._run_args_command(
@@ -231,14 +283,14 @@ class XrayService:
             )
         finally:
             await asyncio.to_thread(self._safe_unlink, config_file)
+        return code, stdout, stderr
 
-        if code == 0:
-            return
-        if self._looks_like_user_exists_error(stdout, stderr):
-            logger.debug("Xray API add user ignored existing user: %s", email)
-            return
-        logger.error("Xray API add user failed (%s): %s", code, stderr.strip() or stdout.strip())
-        raise RuntimeError("Failed to add user via Xray API")
+    def _build_adu_payload_from_config(self, email: str, user_uuid: str) -> dict[str, Any]:
+        config = self._read_config()
+        inbound = copy.deepcopy(self._find_inbound(config))
+        inbound.setdefault("settings", {})
+        inbound["settings"]["clients"] = [self._build_client(user_uuid=user_uuid, email=email)]
+        return {"inbounds": [inbound]}
 
     async def _remove_user_via_api(self, email: str) -> None:
         async with self._lock:
@@ -316,6 +368,21 @@ class XrayService:
         text = f"{stdout}\n{stderr}".lower()
         markers = ("not found", "not exist", "removed 0 user", "no such")
         return any(marker in text for marker in markers)
+
+    @staticmethod
+    def _looks_like_not_found_error(stdout: str, stderr: str) -> bool:
+        text = f"{stdout}\n{stderr}".lower()
+        return "not found" in text
+
+    @staticmethod
+    def _adu_added_users_count(stdout: str) -> int:
+        match = re.search(r"Added\s+(\d+)\s+user\(s\)\s+in total", stdout)
+        if not match:
+            return 0
+        try:
+            return int(match.group(1))
+        except ValueError:
+            return 0
 
     def _is_api_mode(self) -> bool:
         return self.settings.xray_control_mode.strip().lower() == "api"

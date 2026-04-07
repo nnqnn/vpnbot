@@ -53,6 +53,7 @@ class Settings(BaseSettings):
 
     auto_renew_interval_minutes: int = Field(default=30, alias="AUTO_RENEW_INTERVAL_MINUTES")
     payment_poll_interval_seconds: int = Field(default=60, alias="PAYMENT_POLL_INTERVAL_SECONDS")
+    xray_sync_interval_minutes: int = Field(default=5, alias="XRAY_SYNC_INTERVAL_MINUTES")
     device_limit_interval_minutes: int = Field(default=10, alias="DEVICE_LIMIT_INTERVAL_MINUTES")
     notify_interval_minutes: int = Field(default=30, alias="NOTIFY_INTERVAL_MINUTES")
 

@@ -46,6 +46,14 @@ class SchedulerService:
             max_instances=1,
             coalesce=True,
         )
+        if self.settings.xray_sync_interval_minutes > 0:
+            self.scheduler.add_job(
+                self._xray_sync_job,
+                trigger=IntervalTrigger(minutes=self.settings.xray_sync_interval_minutes),
+                id="xray_sync_job",
+                max_instances=1,
+                coalesce=True,
+            )
         self.scheduler.add_job(
             self._notify_job,
             trigger=IntervalTrigger(minutes=self.settings.notify_interval_minutes),
@@ -75,6 +83,9 @@ class SchedulerService:
     async def _auto_renew_job(self) -> None:
         await self.billing_service.run_auto_renew(self.bot)
         await self.billing_service.reconcile_states()
+
+    async def _xray_sync_job(self) -> None:
+        await self.billing_service.sync_xray_runtime_state()
 
     async def _notify_job(self) -> None:
         await self.billing_service.send_expiration_warnings(self.bot)

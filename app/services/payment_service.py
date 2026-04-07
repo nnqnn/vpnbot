@@ -9,7 +9,7 @@ from aiogram import Bot
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.config import Settings
-from app.db.models import Payment, PaymentStatus, User
+from app.db.models import Payment, User
 from app.db.repositories import PaymentRepository
 from app.utils.security import generate_payment_label
 
@@ -39,7 +39,7 @@ class TelegaPayService:
             "currency": "RUB",
             "description": f"Balance top-up for TG {user.telegram_id}",
             "order_id": order_id,
-            "payment_method": "SBP",
+            "payment_method": "QR_CODE",
             "user_id": str(user.telegram_id),
         }
         if self.settings.telegapay_return_url:
@@ -124,38 +124,6 @@ class TelegaPayService:
 
             await session.commit()
         return processed
-
-    async def confirm_pending_payment(
-        self,
-        payment: Payment,
-        user: User,
-    ) -> tuple[bool, str]:
-        if payment.user_id != user.id:
-            return False, "Этот платеж вам не принадлежит."
-        if payment.status == PaymentStatus.paid:
-            return True, f"Платеж уже зачислен. Баланс: {user.balance} ₽"
-        if payment.status != PaymentStatus.pending:
-            return True, "Платеж уже завершен или отменен."
-        if not payment.external_operation_id:
-            return False, "У платежа отсутствует transaction_id. Создайте новый платеж."
-
-        transaction_id = payment.external_operation_id
-        try:
-            response = await self._post("confirm_payment", {"transaction_id": transaction_id})
-        except PaymentProviderError as exc:
-            logger.warning("TelegaPay confirm failed tx=%s: %s", transaction_id, exc)
-            return False, f"Не удалось отправить подтверждение оплаты: {exc}"
-
-        if not response.get("success", True):
-            return False, "Платежный шлюз не принял подтверждение. Попробуйте позже."
-
-        return (
-            True,
-            (
-                "✅ Получили ваш сигнал об оплате.\n"
-                "Как только статус станет успешным, баланс зачислится."
-            ),
-        )
 
     async def _safe_check_status(self, transaction_id: str) -> dict | None:
         try:

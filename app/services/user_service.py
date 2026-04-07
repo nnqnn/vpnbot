@@ -49,7 +49,7 @@ class UserService:
             balance=Decimal("0.00"),
             expiration_date=expiration,
             status=UserStatus.active,
-            vpn_enabled=True,
+            vpn_enabled=False,
             referral_code=referral_code,
             referred_by=inviter.id if inviter else None,
         )
@@ -59,8 +59,6 @@ class UserService:
             self.extend_user_days(inviter, self.settings.referral_bonus_days)
             inviter.warning_sent_at = None
             inviter_telegram_id = inviter.telegram_id
-            if inviter.status == UserStatus.active and not inviter.device_limit_blocked:
-                inviter.vpn_enabled = True
 
         await session.flush()
         return user, True, inviter_telegram_id
@@ -73,6 +71,7 @@ class UserService:
         if not user.expiration_date or user.expiration_date <= utc_now():
             return
         await self.xray_service.enable_user(user.telegram_id, str(user.uuid))
+        user.vpn_enabled = True
 
     async def disable_vpn(self, user: User) -> None:
         await self.xray_service.disable_user(user.telegram_id)
