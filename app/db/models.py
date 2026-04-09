@@ -26,6 +26,11 @@ class PaymentStatus(str, enum.Enum):
     failed = "failed"
 
 
+class SubscriptionChargeSource(str, enum.Enum):
+    manual = "manual"
+    auto = "auto"
+
+
 class User(Base):
     __tablename__ = "users"
 
@@ -79,6 +84,35 @@ class Referral(Base):
     invited_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False, index=True)
     bonus_applied: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
+class SubscriptionCharge(Base):
+    __tablename__ = "subscription_charges"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False, index=True)
+    source: Mapped[SubscriptionChargeSource] = mapped_column(
+        Enum(SubscriptionChargeSource),
+        default=SubscriptionChargeSource.manual,
+        nullable=False,
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
+class ReferralYearReward(Base):
+    __tablename__ = "referral_year_rewards"
+    __table_args__ = (UniqueConstraint("inviter_id", name="uq_referral_year_rewards_inviter_id"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    inviter_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False, index=True)
+    rewarded_groups: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+        nullable=False,
+    )
 
 
 class UserPolicy(Base):

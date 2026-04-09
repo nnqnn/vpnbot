@@ -19,6 +19,8 @@ class Settings(BaseSettings):
     month_price_rub: int = Field(default=100, alias="MONTH_PRICE_RUB")
     trial_days: int = Field(default=1, alias="TRIAL_DAYS")
     referral_bonus_days: int = Field(default=2, alias="REFERRAL_BONUS_DAYS")
+    referral_paid_invites_for_year_reward: int = Field(default=5, alias="REFERRAL_YEAR_THRESHOLD")
+    referral_year_reward_days: int = Field(default=365, alias="REFERRAL_YEAR_REWARD_DAYS")
     max_devices: int = Field(default=4, alias="MAX_DEVICES")
 
     telegapay_base_url: str = Field(alias="TELEGAPAY_BASE_URL")

@@ -1,0 +1,20 @@
+[Unit]
+Description=Safe Xray restart with runtime resync
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=root
+Group=root
+WorkingDirectory=/home/tgvpn
+EnvironmentFile=/home/tgvpn/.env
+ExecStart=/bin/systemctl restart xray
+ExecStartPost=/home/tgvpn/.venv/bin/python /home/tgvpn/scripts/resync_xray_runtime.py
+TimeoutStartSec=180
+RemainAfterExit=no
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

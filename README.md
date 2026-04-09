@@ -12,7 +12,9 @@
   - отдельная кнопка покупки месяца (`100 ₽ / 30 дней`)
 - Автопродление по балансу (планировщик)
 - Автоотключение при нехватке средств
-- Реферальная система (+2 дня)
+- Реферальная система:
+  - +`REFERRAL_BONUS_DAYS` за регистрацию по вашей ссылке
+  - +`REFERRAL_YEAR_REWARD_DAYS` при каждом пороге `REFERRAL_YEAR_THRESHOLD` оплативших подписку рефералов
 - Стартовый триал (+1 день)
 - Админ-панель внутри Telegram (для одного super-admin)
 - Интеграция с Xray через API (`adu/rmu`) или через `config.json`
@@ -110,6 +112,21 @@ docker-compose.yml
 - `invited_id`
 - `bonus_applied`
 - `created_at`
+
+### subscription_charges
+
+- `id`
+- `user_id`
+- `source` (`manual`, `auto`)
+- `created_at`
+
+### referral_year_rewards
+
+- `id`
+- `inviter_id`
+- `rewarded_groups` (сколько порогов уже награждено)
+- `created_at`
+- `updated_at`
 
 ## Интеграция с Xray
 
@@ -296,6 +313,8 @@ apt-get install -y docker-compose-plugin
 - `XRAY_API_TIMEOUT_SECONDS`
 - `XRAY_API_ENABLED`
 - `XRAY_SYNC_INTERVAL_MINUTES`
+- `REFERRAL_YEAR_THRESHOLD`
+- `REFERRAL_YEAR_REWARD_DAYS`
 
 Для `api`-режима пользователю бота нужен доступ к бинарнику `xray` и локальному API-порту.  
 Для `config`-режима дополнительно нужны права на запись `config.json` и reload/restart Xray.
@@ -346,6 +365,46 @@ python3 scripts/resync_xray_runtime.py
 ```bash
 python3 scripts/resync_xray_runtime.py --rebuild
 ```
+
+## 7) Backfill реферальных годовых бонусов
+
+Если вы включаете новую механику постфактум и хотите учесть исторические данные:
+
+```bash
+cd /home/tgvpn
+source .venv/bin/activate
+python3 scripts/backfill_referral_year_rewards.py
+```
+
+По умолчанию это dry-run (ничего не записывает). Для применения:
+
+```bash
+python3 scripts/backfill_referral_year_rewards.py --apply
+```
+
+Критерий исторической "оплаты подписки" в backfill:
+- у приглашенного есть хотя бы один `payments.status=paid`;
+- и `expiration_date` больше окна trial (`created_at + TRIAL_DAYS`).
+
+## 8) Безопасный daily restart Xray (опционально)
+
+Если все же нужен ежедневный restart Xray, используйте unit с `ExecStartPost` ресинком,
+чтобы сразу восстановить runtime-пользователей из БД.
+
+Шаблоны:
+- `deploy/systemd/xray-restart.service`
+- `deploy/systemd/xray-restart.timer`
+
+Установка:
+
+```bash
+sudo cp deploy/systemd/xray-restart.service /etc/systemd/system/xray-restart.service
+sudo cp deploy/systemd/xray-restart.timer /etc/systemd/system/xray-restart.timer
+sudo systemctl daemon-reload
+sudo systemctl enable --now xray-restart.timer
+```
+
+Важно: удалите старую версию unit, если в ней был `pkill -f xray` (он повышает риск аварий).
 
 Если изменили `.env` или код:
 

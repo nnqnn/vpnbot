@@ -9,8 +9,13 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.config import Settings
-from app.db.models import User, UserStatus
-from app.db.repositories import UserRepository
+from app.db.models import SubscriptionChargeSource, User, UserStatus
+from app.db.repositories import (
+    ReferralRepository,
+    ReferralYearRewardRepository,
+    SubscriptionChargeRepository,
+    UserRepository,
+)
 from app.services.user_service import UserService
 from app.services.xray_service import XrayService
 from app.utils.time import utc_now
@@ -31,7 +36,7 @@ class BillingService:
         self.user_service = user_service
         self.xray_service = xray_service
 
-    async def purchase_month(self, session: AsyncSession, user: User) -> tuple[bool, str]:
+    async def purchase_month(self, session: AsyncSession, user: User, bot: Bot | None = None) -> tuple[bool, str]:
         month_price = Decimal(str(self.settings.month_price_rub))
         if user.status == UserStatus.banned:
             return False, "Покупка недоступна: ваш аккаунт заблокирован."
@@ -47,6 +52,9 @@ class BillingService:
         if not user.device_limit_blocked:
             await self.xray_service.enable_user(user.telegram_id, str(user.uuid))
             user.vpn_enabled = True
+
+        await self._record_subscription_payment(session, user, source=SubscriptionChargeSource.manual)
+        await self._maybe_apply_referral_year_reward(session, invited_user=user, bot=bot)
 
         await session.flush()
         return True, (
@@ -74,6 +82,8 @@ class BillingService:
                     if not user.device_limit_blocked:
                         await self.xray_service.enable_user(user.telegram_id, str(user.uuid))
                         user.vpn_enabled = True
+                    await self._record_subscription_payment(session, user, source=SubscriptionChargeSource.auto)
+                    await self._maybe_apply_referral_year_reward(session, invited_user=user, bot=bot)
                     await self._safe_send(
                         bot,
                         user.telegram_id,
@@ -145,6 +155,73 @@ class BillingService:
         await self.xray_service.sync_enabled_users(enabled_users, all_managed_telegram_ids=managed_ids)
         logger.info("Xray runtime sync done: enabled=%s managed=%s", len(enabled_users), len(managed_ids))
         return len(enabled_users), len(managed_ids)
+
+    async def _record_subscription_payment(
+        self,
+        session: AsyncSession,
+        user: User,
+        source: SubscriptionChargeSource,
+    ) -> None:
+        await SubscriptionChargeRepository(session).create(user_id=user.id, source=source)
+
+    async def _maybe_apply_referral_year_reward(
+        self,
+        session: AsyncSession,
+        invited_user: User,
+        bot: Bot | None,
+    ) -> None:
+        threshold = max(1, int(self.settings.referral_paid_invites_for_year_reward))
+        reward_days = max(1, int(self.settings.referral_year_reward_days))
+
+        referral_repo = ReferralRepository(session)
+        referral = await referral_repo.get_by_invited(invited_user.id)
+        if referral is None:
+            return
+
+        user_repo = UserRepository(session)
+        inviter = await user_repo.get_by_id(referral.inviter_id)
+        if inviter is None:
+            return
+
+        paid_referrals = await referral_repo.count_invited_with_subscription_payment(inviter.id)
+        eligible_groups = paid_referrals // threshold
+        if eligible_groups <= 0:
+            return
+
+        reward_repo = ReferralYearRewardRepository(session)
+        reward_state = await reward_repo.ensure(inviter.id)
+        rewarded_groups = int(reward_state.rewarded_groups or 0)
+        pending_groups = eligible_groups - rewarded_groups
+        if pending_groups <= 0:
+            return
+
+        total_reward_days = reward_days * pending_groups
+        self.user_service.extend_user_days(inviter, total_reward_days)
+        inviter.warning_sent_at = None
+
+        if inviter.status == UserStatus.active and not inviter.device_limit_blocked:
+            await self.xray_service.enable_user(inviter.telegram_id, str(inviter.uuid))
+            inviter.vpn_enabled = True
+
+        reward_state.rewarded_groups = rewarded_groups + pending_groups
+        logger.info(
+            "Applied referral year reward: inviter=%s paid_referrals=%s groups=%s days=%s",
+            inviter.telegram_id,
+            paid_referrals,
+            pending_groups,
+            total_reward_days,
+        )
+
+        if bot is not None:
+            await self._safe_send(
+                bot,
+                inviter.telegram_id,
+                (
+                    "🎉 Поздравляем! Вы получили реферальный бонус.\n"
+                    f"Оплативших приглашенных: {paid_referrals}\n"
+                    f"Начислено: +{total_reward_days} дн. VPN."
+                ),
+            )
 
     async def _disable_if_needed(self, user: User) -> None:
         await self.xray_service.disable_user(user.telegram_id)

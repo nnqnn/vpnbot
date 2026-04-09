@@ -6,7 +6,17 @@ from decimal import Decimal
 from sqlalchemy import Select, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.models import Payment, PaymentStatus, Referral, User, UserPolicy, UserStatus
+from app.db.models import (
+    Payment,
+    PaymentStatus,
+    Referral,
+    ReferralYearReward,
+    SubscriptionCharge,
+    SubscriptionChargeSource,
+    User,
+    UserPolicy,
+    UserStatus,
+)
 
 
 class UserRepository:
@@ -142,6 +152,52 @@ class ReferralRepository:
         self.session.add(referral)
         await self.session.flush()
         return referral
+
+    async def get_by_invited(self, invited_id: int) -> Referral | None:
+        query: Select[tuple[Referral]] = select(Referral).where(Referral.invited_id == invited_id)
+        result = await self.session.execute(query)
+        return result.scalar_one_or_none()
+
+    async def count_invited_with_subscription_payment(self, inviter_id: int) -> int:
+        query = (
+            select(func.count(func.distinct(Referral.invited_id)))
+            .join(SubscriptionCharge, SubscriptionCharge.user_id == Referral.invited_id)
+            .where(Referral.inviter_id == inviter_id)
+        )
+        result = await self.session.execute(query)
+        return int(result.scalar_one() or 0)
+
+
+class SubscriptionChargeRepository:
+    def __init__(self, session: AsyncSession) -> None:
+        self.session = session
+
+    async def create(self, user_id: int, source: SubscriptionChargeSource) -> SubscriptionCharge:
+        event = SubscriptionCharge(user_id=user_id, source=source)
+        self.session.add(event)
+        await self.session.flush()
+        return event
+
+
+class ReferralYearRewardRepository:
+    def __init__(self, session: AsyncSession) -> None:
+        self.session = session
+
+    async def get_by_inviter_id(self, inviter_id: int) -> ReferralYearReward | None:
+        query: Select[tuple[ReferralYearReward]] = select(ReferralYearReward).where(
+            ReferralYearReward.inviter_id == inviter_id
+        )
+        result = await self.session.execute(query)
+        return result.scalar_one_or_none()
+
+    async def ensure(self, inviter_id: int) -> ReferralYearReward:
+        record = await self.get_by_inviter_id(inviter_id)
+        if record is not None:
+            return record
+        record = ReferralYearReward(inviter_id=inviter_id, rewarded_groups=0)
+        self.session.add(record)
+        await self.session.flush()
+        return record
 
 
 class UserPolicyRepository:

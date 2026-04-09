@@ -18,7 +18,7 @@ from app.bot.keyboards import (
     topup_amounts_menu,
 )
 from app.config import Settings
-from app.db.repositories import UserPolicyRepository, UserRepository
+from app.db.repositories import ReferralRepository, UserPolicyRepository, UserRepository
 from app.services.billing_service import BillingService
 from app.services.payment_service import PaymentProviderError, TelegaPayService
 from app.services.user_service import UserService
@@ -74,6 +74,14 @@ async def _safe_edit_text(message: Message, text: str, reply_markup) -> None:
         if "message is not modified" in str(exc).lower():
             return
         raise
+
+
+def _referral_promo_text(settings: Settings) -> str:
+    return (
+        f"КАЖДЫЙ ПРИГЛАШЕННЫЙ ПОЛЬЗОВАТЕЛЬ = +{settings.referral_bonus_days} бесплатных дня.\n\n"
+        f"{settings.referral_paid_invites_for_year_reward} оплативших подписку рефералов = "
+        f"+{settings.referral_year_reward_days} бесплатных дней VPN."
+    )
 
 
 async def _ensure_access_for_callback(
@@ -157,7 +165,7 @@ async def start_handler(
     )
     if is_new:
         text += f"\n\n🎁 Стартовый бонус: {settings.trial_days} день."
-    text += f"\n\nКАЖДЫЙ ПРИГЛАШЕННЫЙ ПОЛЬЗОВАТЕЛЬ = +{settings.referral_bonus_days} бесплатных дня.\n\nРеферальная ссылка: https://t.me/{bot_info.username}?start=ref_{user.referral_code}"
+    text += f"\n\n{_referral_promo_text(settings)}\n\nРеферальная ссылка: https://t.me/{bot_info.username}?start=ref_{user.referral_code}"
     await message.answer(text, reply_markup=main_menu(is_admin=settings.is_admin(message.from_user.id)))
 
 
@@ -181,7 +189,7 @@ async def menu_back_handler(
         "Здесь лучший VPN по доступной цене\n"
         f"Тариф: {settings.month_price_rub} ₽ / 30 дней."
     )
-    text += f"\n\nКАЖДЫЙ ПРИГЛАШЕННЫЙ ПОЛЬЗОВАТЕЛЬ = +{settings.referral_bonus_days} бесплатных дня.\n\nРеферальная ссылка: https://t.me/{bot_info.username}?start=ref_{user.referral_code}"
+    text += f"\n\n{_referral_promo_text(settings)}\n\nРеферальная ссылка: https://t.me/{bot_info.username}?start=ref_{user.referral_code}"
 
     await callback.message.edit_text(
         text,
@@ -245,7 +253,7 @@ async def buy_month_handler(
         return
     if not await _ensure_access_for_callback(callback, session, settings, bot, user):
         return
-    success, text = await billing_service.purchase_month(session, user)
+    success, text = await billing_service.purchase_month(session, user, bot=callback.bot)
     if success:
         await callback.message.edit_text(
             text,
@@ -353,14 +361,18 @@ async def referrals_handler(
     if not await _ensure_access_for_callback(callback, session, settings, bot, user):
         return
 
-    repo = UserRepository(session)
-    invited_count = await repo.count_referrals(user.id)
+    user_repo = UserRepository(session)
+    invited_count = await user_repo.count_referrals(user.id)
+    paid_count = await ReferralRepository(session).count_invited_with_subscription_payment(user.id)
+    threshold = settings.referral_paid_invites_for_year_reward
     bot_info = await bot.get_me()
     link = f"https://t.me/{bot_info.username}?start=ref_{user.referral_code}"
     text = (
         "🎁 Реферальная программа\n\n"
         f"За каждого приглашенного: +{settings.referral_bonus_days} дня.\n"
-        f"Приглашено: {invited_count}\n\n"
+        f"{threshold} оплативших подписку рефералов: +{settings.referral_year_reward_days} дней.\n\n"
+        f"Приглашено: {invited_count}\n"
+        f"Оплатили подписку: {paid_count}/{threshold}\n\n"
         f"Ваша ссылка:\n{link}"
     )
     await callback.message.edit_text(text, reply_markup=main_menu(is_admin=settings.is_admin(callback.from_user.id)))
@@ -422,7 +434,7 @@ async def gate_check_subscription(
         "Здесь лучший VPN по доступной цене\n"
         f"Тариф: {settings.month_price_rub} ₽ / 30 дней."
     )
-    text += f"\n\nКАЖДЫЙ ПРИГЛАШЕННЫЙ ПОЛЬЗОВАТЕЛЬ = +{settings.referral_bonus_days} бесплатных дня.\n\nРеферальная ссылка: https://t.me/{bot_info.username}?start=ref_{user.referral_code}"
+    text += f"\n\n{_referral_promo_text(settings)}\n\nРеферальная ссылка: https://t.me/{bot_info.username}?start=ref_{user.referral_code}"
     await callback.message.edit_text(
         text,
         reply_markup=main_menu(is_admin=settings.is_admin(callback.from_user.id)),
@@ -457,7 +469,7 @@ async def gate_accept_terms(
         "Здесь лучший VPN по доступной цене\n"
         f"Тариф: {settings.month_price_rub} ₽ / 30 дней."
     )
-    text += f"\n\nКАЖДЫЙ ПРИГЛАШЕННЫЙ ПОЛЬЗОВАТЕЛЬ = +{settings.referral_bonus_days} бесплатных дня.\n\nРеферальная ссылка: https://t.me/{bot_info.username}?start=ref_{user.referral_code}"
+    text += f"\n\n{_referral_promo_text(settings)}\n\nРеферальная ссылка: https://t.me/{bot_info.username}?start=ref_{user.referral_code}"
     await callback.message.edit_text(
         text,
         reply_markup=main_menu(is_admin=settings.is_admin(callback.from_user.id)),
