@@ -75,6 +75,21 @@ class Payment(Base):
     user: Mapped[User] = relationship(back_populates="payments")
 
 
+class DeferredTariffPurchase(Base):
+    __tablename__ = "deferred_tariff_purchases"
+    __table_args__ = (UniqueConstraint("payment_id", name="uq_deferred_tariff_purchases_payment_id"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False, index=True)
+    payment_id: Mapped[int] = mapped_column(ForeignKey("payments.id"), nullable=False, index=True)
+    tariff_code: Mapped[str] = mapped_column(String(32), nullable=False)
+    tariff_price: Mapped[Decimal] = mapped_column(Numeric(10, 2), nullable=False)
+    tariff_days: Mapped[int] = mapped_column(Integer, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    applied_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    cancelled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
 class Referral(Base):
     __tablename__ = "referrals"
     __table_args__ = (UniqueConstraint("invited_id", name="uq_referrals_invited_id"),)

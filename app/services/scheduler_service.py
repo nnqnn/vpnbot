@@ -77,8 +77,18 @@ class SchedulerService:
 
     async def _payments_job(self) -> None:
         processed = await self.payment_service.poll_pending_payments(self.bot)
+        applied_tariffs, cancelled_tariffs = await self.billing_service.process_deferred_tariff_purchases(self.bot)
         if processed:
             logger.info("Processed %s pending payments", processed)
+            # Fast-path reactivation: do not wait for the longer auto-renew interval after successful top-up.
+            await self.billing_service.run_auto_renew(self.bot)
+            await self.billing_service.reconcile_states()
+        if applied_tariffs or cancelled_tariffs:
+            logger.info(
+                "Deferred tariff purchases: applied=%s cancelled=%s",
+                applied_tariffs,
+                cancelled_tariffs,
+            )
 
     async def _auto_renew_job(self) -> None:
         await self.billing_service.run_auto_renew(self.bot)

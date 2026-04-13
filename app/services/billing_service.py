@@ -1,16 +1,20 @@
 from __future__ import annotations
 
 import logging
+from dataclasses import dataclass
 from datetime import timedelta
-from decimal import Decimal
+from decimal import ROUND_UP, Decimal
+from typing import TYPE_CHECKING
 
 from aiogram import Bot
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.config import Settings
-from app.db.models import SubscriptionChargeSource, User, UserStatus
+from app.db.models import PaymentStatus, SubscriptionChargeSource, User, UserStatus
 from app.db.repositories import (
+    DeferredTariffPurchaseRepository,
+    PaymentRepository,
     ReferralRepository,
     ReferralYearRewardRepository,
     SubscriptionChargeRepository,
@@ -20,7 +24,18 @@ from app.services.user_service import UserService
 from app.services.xray_service import XrayService
 from app.utils.time import utc_now
 
+if TYPE_CHECKING:
+    from app.services.payment_service import TelegaPayService
+
 logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class TariffPlan:
+    code: str
+    title: str
+    price: Decimal
+    days: int
 
 
 class BillingService:
@@ -36,6 +51,88 @@ class BillingService:
         self.user_service = user_service
         self.xray_service = xray_service
 
+    def list_tariffs(self) -> tuple[TariffPlan, ...]:
+        return (
+            TariffPlan(code="1m", title="1 месяц", price=Decimal("100"), days=30),
+            TariffPlan(code="3m", title="3 месяца", price=Decimal("270"), days=90),
+            TariffPlan(code="12m", title="12 месяцев", price=Decimal("990"), days=365),
+        )
+
+    def get_tariff(self, code: str) -> TariffPlan | None:
+        for tariff in self.list_tariffs():
+            if tariff.code == code:
+                return tariff
+        return None
+
+    def build_tariffs_text(self) -> str:
+        return (
+            "💳 Выберите тариф VPN:\n\n"
+            "• 1 месяц — 100 ₽\n"
+            "• 3 месяца — 270 ₽\n"
+            "• 12 месяцев — 990 ₽ (-20%)\n\n"
+        )
+
+    async def purchase_tariff(
+        self,
+        session: AsyncSession,
+        user: User,
+        tariff_code: str,
+        payment_service: TelegaPayService,
+        bot: Bot | None = None,
+    ) -> tuple[str, str, str | None]:
+        tariff = self.get_tariff(tariff_code)
+        if tariff is None:
+            return "error", "Неизвестный тариф.", None
+        if user.status == UserStatus.banned:
+            return "error", "Покупка недоступна: ваш аккаунт заблокирован.", None
+
+        if user.balance >= tariff.price:
+            await self._charge_subscription(
+                session=session,
+                user=user,
+                price=tariff.price,
+                days=tariff.days,
+                source=SubscriptionChargeSource.manual,
+                bot=bot,
+            )
+            await session.flush()
+            return (
+                "applied",
+                (
+                    f"✅ Тариф активирован: {tariff.title}\n"
+                    f"Списано: {tariff.price} ₽\n"
+                    f"Срок продлен на {tariff.days} дней\n"
+                    f"Баланс: {user.balance} ₽"
+                ),
+                None,
+            )
+
+        shortage = tariff.price - user.balance
+        payment_amount = self._payment_amount_for_shortage(shortage)
+        payment, payment_url = await payment_service.create_payment(user=user, amount_rub=payment_amount)
+        await DeferredTariffPurchaseRepository(session).create(
+            user_id=user.id,
+            payment_id=payment.id,
+            tariff_code=tariff.code,
+            tariff_price=tariff.price,
+            tariff_days=tariff.days,
+        )
+        await session.flush()
+
+        reserve = Decimal(str(payment_amount)) - shortage
+        reserve_note = ""
+        if reserve > Decimal("0"):
+            reserve_note = f"\nПосле оплаты {reserve} ₽ останется на балансе."
+
+        return (
+            "payment_required",
+            (
+                f"Сумма платежа: {payment_amount} ₽{reserve_note}\n\n"
+                "После успешной оплаты тариф активируется автоматически."
+            ),
+            payment_url,
+        )
+
     async def purchase_month(self, session: AsyncSession, user: User, bot: Bot | None = None) -> tuple[bool, str]:
         month_price = Decimal(str(self.settings.month_price_rub))
         if user.status == UserStatus.banned:
@@ -43,19 +140,14 @@ class BillingService:
         if user.balance < month_price:
             return False, f"Недостаточно средств. Нужно минимум {month_price} ₽."
 
-        user.balance -= month_price
-        now = utc_now()
-        base = user.expiration_date if user.expiration_date and user.expiration_date > now else now
-        user.expiration_date = base + timedelta(days=30)
-        user.warning_sent_at = None
-
-        if not user.device_limit_blocked:
-            await self.xray_service.enable_user(user.telegram_id, str(user.uuid))
-            user.vpn_enabled = True
-
-        await self._record_subscription_payment(session, user, source=SubscriptionChargeSource.manual)
-        await self._maybe_apply_referral_year_reward(session, invited_user=user, bot=bot)
-
+        await self._charge_subscription(
+            session=session,
+            user=user,
+            price=month_price,
+            days=30,
+            source=SubscriptionChargeSource.manual,
+            bot=bot,
+        )
         await session.flush()
         return True, (
             f"✅ Оплата прошла успешно.\n"
@@ -76,14 +168,14 @@ class BillingService:
                     continue
 
                 if user.balance >= month_price:
-                    user.balance -= month_price
-                    user.expiration_date = now + timedelta(days=30)
-                    user.warning_sent_at = None
-                    if not user.device_limit_blocked:
-                        await self.xray_service.enable_user(user.telegram_id, str(user.uuid))
-                        user.vpn_enabled = True
-                    await self._record_subscription_payment(session, user, source=SubscriptionChargeSource.auto)
-                    await self._maybe_apply_referral_year_reward(session, invited_user=user, bot=bot)
+                    await self._charge_subscription(
+                        session=session,
+                        user=user,
+                        price=month_price,
+                        days=30,
+                        source=SubscriptionChargeSource.auto,
+                        bot=bot,
+                    )
                     await self._safe_send(
                         bot,
                         user.telegram_id,
@@ -106,15 +198,95 @@ class BillingService:
             repo = UserRepository(session)
             users = await repo.users_for_warning(now=now, warning_window_hours=24)
             for user in users:
-                if user.warning_sent_at and (now - user.warning_sent_at) < timedelta(hours=20):
+                if not user.expiration_date:
                     continue
+
+                remaining = user.expiration_date - now
+                if remaining <= timedelta(hours=6):
+                    six_hour_cutoff = user.expiration_date - timedelta(hours=8)
+                    if user.warning_sent_at and user.warning_sent_at >= six_hour_cutoff:
+                        continue
+                    text = (
+                        "⏰ До окончания VPN-доступа осталось меньше 6 часов.\n"
+                        "Откройте раздел «Купить VPN», чтобы продлить доступ без отключения."
+                    )
+                else:
+                    if user.warning_sent_at is not None:
+                        continue
+                    text = (
+                        "⚠️ До окончания VPN-доступа осталось меньше 24 часов.\n"
+                        "Откройте раздел «Купить VPN», чтобы продлить доступ заранее."
+                    )
+
                 user.warning_sent_at = now
+                await self._safe_send(bot, user.telegram_id, text)
+            await session.commit()
+
+    async def process_deferred_tariff_purchases(self, bot: Bot) -> tuple[int, int]:
+        now = utc_now()
+        applied = 0
+        cancelled = 0
+        async with self.session_maker() as session:
+            deferred_repo = DeferredTariffPurchaseRepository(session)
+            payment_repo = PaymentRepository(session)
+            user_repo = UserRepository(session)
+            pending = await deferred_repo.list_pending(limit=200)
+            for purchase in pending:
+                payment = await payment_repo.get_by_id(purchase.payment_id)
+                if payment is None or payment.status in {PaymentStatus.cancelled, PaymentStatus.failed}:
+                    purchase.cancelled_at = now
+                    cancelled += 1
+                    continue
+                if payment.status != PaymentStatus.paid:
+                    continue
+
+                user = await user_repo.get_by_id(purchase.user_id)
+                if user is None:
+                    purchase.cancelled_at = now
+                    cancelled += 1
+                    continue
+                if user.status == UserStatus.banned:
+                    purchase.cancelled_at = now
+                    cancelled += 1
+                    await self._safe_send(
+                        bot,
+                        user.telegram_id,
+                        "⚠️ Платеж зачислен в баланс, но тариф не активирован: аккаунт заблокирован.",
+                    )
+                    continue
+                if user.balance < purchase.tariff_price:
+                    logger.warning(
+                        "Deferred tariff purchase is underfunded: user=%s payment_id=%s required=%s balance=%s",
+                        user.telegram_id,
+                        purchase.payment_id,
+                        purchase.tariff_price,
+                        user.balance,
+                    )
+                    continue
+
+                await self._charge_subscription(
+                    session=session,
+                    user=user,
+                    price=purchase.tariff_price,
+                    days=int(purchase.tariff_days),
+                    source=SubscriptionChargeSource.manual,
+                    bot=bot,
+                )
+                purchase.applied_at = now
+                applied += 1
+                tariff = self.get_tariff(purchase.tariff_code)
+                tariff_title = tariff.title if tariff else f"{purchase.tariff_days} дней"
                 await self._safe_send(
                     bot,
                     user.telegram_id,
-                    "⚠️ До окончания VPN-доступа осталось меньше 24 часов. Пополните баланс заранее.",
+                    (
+                        f"✅ Тариф активирован автоматически: {tariff_title}\n"
+                        f"Списано: {purchase.tariff_price} ₽\n"
+                        f"Баланс: {user.balance} ₽"
+                    ),
                 )
             await session.commit()
+        return applied, cancelled
 
     async def reconcile_states(self) -> None:
         now = utc_now()
@@ -222,6 +394,34 @@ class BillingService:
                     f"Начислено: +{total_reward_days} дн. VPN."
                 ),
             )
+
+    async def _charge_subscription(
+        self,
+        session: AsyncSession,
+        user: User,
+        *,
+        price: Decimal,
+        days: int,
+        source: SubscriptionChargeSource,
+        bot: Bot | None,
+    ) -> None:
+        user.balance -= price
+        now = utc_now()
+        base = user.expiration_date if user.expiration_date and user.expiration_date > now else now
+        user.expiration_date = base + timedelta(days=days)
+        user.warning_sent_at = None
+
+        if user.status == UserStatus.active and not user.device_limit_blocked:
+            await self.xray_service.enable_user(user.telegram_id, str(user.uuid))
+            user.vpn_enabled = True
+
+        await self._record_subscription_payment(session, user, source=source)
+        await self._maybe_apply_referral_year_reward(session, invited_user=user, bot=bot)
+
+    def _payment_amount_for_shortage(self, shortage: Decimal) -> int:
+        min_amount = Decimal(str(self.settings.payment_min_amount))
+        needed = max(min_amount, max(Decimal("0.00"), shortage))
+        return int(needed.to_integral_value(rounding=ROUND_UP))
 
     async def _disable_if_needed(self, user: User) -> None:
         await self.xray_service.disable_user(user.telegram_id)

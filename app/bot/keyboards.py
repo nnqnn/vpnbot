@@ -7,13 +7,16 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 def main_menu(is_admin: bool = False) -> InlineKeyboardMarkup:
     kb = InlineKeyboardBuilder()
     kb.button(text="ℹ️ Информация", callback_data="menu:info")
-    kb.button(text="🛒 Оплатить месяц", callback_data="menu:buy_month")
+    kb.button(text="🛒 Купить VPN", callback_data="menu:tariffs")
     kb.button(text="💰 Пополнить баланс", callback_data="menu:topup")
     kb.button(text="🎁 Рефералы", callback_data="menu:referrals")
     if is_admin:
         kb.button(text="🛠 Админ-панель", callback_data="admin:open")
-    kb.button(text="🔗 Моя VPN-ссылка", callback_data="menu:vpn_link")
-    kb.adjust(2, 2, 1, 1)
+    kb.button(text="🔐 Мой VPN", callback_data="menu:vpn_link")
+    if is_admin:
+        kb.adjust(1, 1, 2, 1, 1)
+    else:
+        kb.adjust(1, 1, 2, 1)
     return kb.as_markup()
 
 
@@ -32,6 +35,7 @@ def admin_menu() -> InlineKeyboardMarkup:
     kb = InlineKeyboardBuilder()
     kb.button(text="👥 Список пользователей", callback_data="admin:list_users")
     kb.button(text="💳 Баланс пользователя", callback_data="admin:get_balance")
+    kb.button(text="📡 Онлайн VPN", callback_data="admin:vpn_online_count")
     kb.button(text="➕ Выдать дни", callback_data="admin:add_days")
     kb.button(text="🌍 Выдать дни всем", callback_data="admin:add_days_all")
     kb.button(text="➖ Отнять дни", callback_data="admin:remove_days")
@@ -40,13 +44,23 @@ def admin_menu() -> InlineKeyboardMarkup:
     kb.button(text="🎁 Выдать бонус", callback_data="admin:bonus")
     kb.button(text="📣 Массовая рассылка", callback_data="admin:broadcast")
     kb.button(text="⬅️ В меню", callback_data="menu:back")
-    kb.adjust(1, 1, 2, 2, 2, 1, 1)
+    kb.adjust(1, 1, 1, 2, 2, 2, 1, 1)
     return kb.as_markup()
 
 
 def payment_link_menu(payment_url: str) -> InlineKeyboardMarkup:
     kb = InlineKeyboardBuilder()
     kb.button(text="💸 Перейти к оплате", url=payment_url)
+    kb.button(text="⬅️ Назад", callback_data="menu:back")
+    kb.adjust(1)
+    return kb.as_markup()
+
+
+def vpn_tariffs_menu() -> InlineKeyboardMarkup:
+    kb = InlineKeyboardBuilder()
+    kb.button(text="1 месяц — 100 ₽", callback_data="tariff:1m")
+    kb.button(text="3 месяца — 270 ₽", callback_data="tariff:3m")
+    kb.button(text="12 месяцев — 990 ₽ (-20%)", callback_data="tariff:12m")
     kb.button(text="⬅️ Назад", callback_data="menu:back")
     kb.adjust(1)
     return kb.as_markup()

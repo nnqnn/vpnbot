@@ -109,6 +109,18 @@ class TelegaPayService:
                             user.telegram_id,
                             f"✅ Платеж зачислен: +{payment.amount} ₽\nТекущий баланс: {user.balance} ₽",
                         )
+                        user_label = f"@{user.username}" if user.username else "без username"
+                        await self._safe_send(
+                            bot,
+                            self.settings.super_admin_id,
+                            (
+                                "💰 Пополнение баланса\n"
+                                f"Пользователь: {user_label} ({user.telegram_id})\n"
+                                f"Сумма: +{payment.amount} ₽\n"
+                                f"Баланс после пополнения: {user.balance} ₽\n"
+                                f"Платеж ID: {payment.id}"
+                            ),
+                        )
                         logger.info(
                             "TelegaPay payment confirmed id=%s tx=%s user=%s",
                             payment.id,

@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import re
+from collections import deque
 from decimal import Decimal, InvalidOperation
+from pathlib import Path
 
 from aiogram import F, Router
 from aiogram.filters import Command
@@ -11,11 +14,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.bot.keyboards import admin_menu
 from app.bot.states import AdminStates
 from app.config import Settings
-from app.db.repositories import UserRepository
+from app.db.repositories import ReferralRepository, UserRepository
 from app.services.admin_service import AdminService
-from app.utils.time import human_remaining
+from app.utils.time import human_remaining, utc_now
 
 admin_router = Router(name="admin-router")
+ACCESS_EMAIL_PATTERN = re.compile(r"email[:=]\s*(?P<email>[^\s,\]]+)")
 
 
 async def _is_admin(user_id: int, settings: Settings) -> bool:
@@ -37,14 +41,51 @@ async def _notify_user(bot, telegram_id: int, text: str) -> None:
         return
 
 
+def _username(user) -> str:
+    if user.username:
+        return f"@{user.username}"
+    return "-"
+
+
 def _status_short(user) -> str:
     if user.status.value == "banned":
-        return "banned"
+        return "ban"
     if user.device_limit_blocked:
-        return "limit-block"
-    if user.vpn_enabled:
-        return "active"
-    return "inactive"
+        return "lim"
+    return "y" if user.vpn_enabled else "n"
+
+
+def _count_online_users_from_access_log(log_path: Path, max_lines: int = 200) -> tuple[int, int] | None:
+    if not log_path.exists():
+        return None
+    lines = deque(maxlen=max_lines)
+    try:
+        with log_path.open("rb") as f:
+            f.seek(0, 2)
+            file_size = f.tell()
+            chunk_size = 4096
+            buffer = b""
+            pos = file_size
+            while pos > 0 and buffer.count(b"\n") <= max_lines:
+                read_size = min(chunk_size, pos)
+                pos -= read_size
+                f.seek(pos)
+                buffer = f.read(read_size) + buffer
+            for raw_line in buffer.splitlines()[-max_lines:]:
+                lines.append(raw_line.decode("utf-8", errors="ignore"))
+    except OSError:
+        return None
+    accepted = 0
+    emails: set[str] = set()
+    for line in lines:
+        if "accepted" not in line.lower():
+            continue
+        accepted += 1
+        match = ACCESS_EMAIL_PATTERN.search(line)
+        if not match:
+            continue
+        emails.add(match.group("email").strip())
+    return len(emails), accepted
 
 
 @admin_router.message(Command("admin"))
@@ -69,7 +110,9 @@ async def admin_list_users(callback: CallbackQuery, session: AsyncSession, setti
     if not await _is_admin(callback.from_user.id, settings):
         await _deny_callback(callback)
         return
-    users = await UserRepository(session).list_users(limit=50)
+    user_repo = UserRepository(session)
+    referral_repo = ReferralRepository(session)
+    users = await user_repo.list_users(limit=50)
     if not users:
         await callback.message.edit_text("Пользователей пока нет.", reply_markup=admin_menu())
         await callback.answer()
@@ -77,9 +120,41 @@ async def admin_list_users(callback: CallbackQuery, session: AsyncSession, setti
     lines = []
     for user in users:
         expires = human_remaining(user.expiration_date, settings.timezone) if user.expiration_date else "0"
-        lines.append(f"{user.telegram_id} | {user.balance} ₽ | {_status_short(user)} | {expires}")
+        referrals_count = await user_repo.count_referrals(user.id)
+        paid_referrals_count = await referral_repo.count_invited_with_subscription_payment(user.id)
+        lines.append(
+            (
+                f"{user.telegram_id} | {_username(user)} | {user.balance} ₽ | "
+                f"ref:{referrals_count} paid:{paid_referrals_count} | {expires} | {_status_short(user)}"
+            )
+        )
     text = "👥 Пользователи (последние 50):\n\n" + "\n".join(lines)
     await callback.message.edit_text(text[:3900], reply_markup=admin_menu())
+    await callback.answer()
+
+
+@admin_router.callback_query(F.data == "admin:vpn_online_count")
+async def admin_vpn_online_count(callback: CallbackQuery, settings: Settings) -> None:
+    if not await _is_admin(callback.from_user.id, settings):
+        await _deny_callback(callback)
+        return
+    result = _count_online_users_from_access_log(settings.xray_access_log_path, max_lines=200)
+    if result is None:
+        await callback.message.edit_text(
+            f"Лог доступа Xray не найден: {settings.xray_access_log_path}",
+            reply_markup=admin_menu(),
+        )
+        await callback.answer()
+        return
+    online_count, accepted_count = result
+    text = (
+        "📡 Онлайн VPN (оценка по access.log)\n\n"
+        f"Уникальных ключей (email): {online_count}\n"
+        f"Accepted строк в последних 200: {accepted_count}"
+    )
+    if accepted_count > 0 and online_count == 0:
+        text += "\n\n⚠️ В accepted-логах не найдено email. Проверьте формат access.log Xray."
+    await callback.message.edit_text(text, reply_markup=admin_menu())
     await callback.answer()
 
 
@@ -259,9 +334,17 @@ async def process_add_days_all(
         return
 
     users = await UserRepository(session).list_all_users()
+    now = utc_now()
     changed = 0
     notified = 0
+    skipped_without_time = 0
     for user in users:
+        if user.status.value != "active" or user.device_limit_blocked:
+            skipped_without_time += 1
+            continue
+        if not user.expiration_date or user.expiration_date <= now:
+            skipped_without_time += 1
+            continue
         await admin_service.add_days(user, days)
         changed += 1
         try:
@@ -275,6 +358,7 @@ async def process_add_days_all(
 
     await message.answer(
         f"Готово: +{days} дн. выдано {changed} пользователям.\n"
+        f"Пропущено (нет активного срока/статуса): {skipped_without_time}\n"
         f"Уведомления доставлены: {notified}."
     )
     await state.clear()

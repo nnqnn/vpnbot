@@ -16,6 +16,7 @@ from app.bot.keyboards import (
     subscription_gate_menu,
     terms_gate_menu,
     topup_amounts_menu,
+    vpn_tariffs_menu,
 )
 from app.config import Settings
 from app.db.repositories import ReferralRepository, UserPolicyRepository, UserRepository
@@ -239,12 +240,34 @@ async def balance_handler(callback: CallbackQuery, session: AsyncSession, settin
     await callback.answer()
 
 
-@user_router.callback_query(F.data == "menu:buy_month")
+@user_router.callback_query(F.data.in_({"menu:tariffs", "menu:buy_month"}))
 async def buy_month_handler(
     callback: CallbackQuery,
     session: AsyncSession,
     settings: Settings,
     billing_service: BillingService,
+) -> None:
+    user = await _get_user(session, callback.from_user.id)
+    if user is None:
+        await callback.answer("Пользователь не найден. Нажмите /start", show_alert=True)
+        return
+    if not await _ensure_access_for_callback(callback, session, settings, callback.bot, user):
+        return
+
+    await callback.message.edit_text(
+        billing_service.build_tariffs_text(),
+        reply_markup=vpn_tariffs_menu(),
+    )
+    await callback.answer()
+
+
+@user_router.callback_query(F.data.startswith("tariff:"))
+async def tariff_purchase_handler(
+    callback: CallbackQuery,
+    session: AsyncSession,
+    settings: Settings,
+    billing_service: BillingService,
+    payment_service: TelegaPayService,
     bot: Bot,
 ) -> None:
     user = await _get_user(session, callback.from_user.id)
@@ -253,14 +276,31 @@ async def buy_month_handler(
         return
     if not await _ensure_access_for_callback(callback, session, settings, bot, user):
         return
-    success, text = await billing_service.purchase_month(session, user, bot=callback.bot)
-    if success:
-        await callback.message.edit_text(
-            text,
-            reply_markup=main_menu(is_admin=settings.is_admin(callback.from_user.id)),
+
+    tariff_code = callback.data.split(":", 1)[1].strip()
+    try:
+        status, text, payment_url = await billing_service.purchase_tariff(
+            session=session,
+            user=user,
+            tariff_code=tariff_code,
+            payment_service=payment_service,
+            bot=callback.bot,
         )
-    else:
+    except (PaymentProviderError, ValueError) as exc:
+        await callback.answer(str(exc), show_alert=True)
+        return
+    if status == "error":
         await callback.answer(text, show_alert=True)
+        return
+    if status == "payment_required" and payment_url:
+        await callback.message.edit_text(text, reply_markup=payment_link_menu(payment_url))
+        await callback.answer()
+        return
+
+    await callback.message.edit_text(
+        text,
+        reply_markup=main_menu(is_admin=settings.is_admin(callback.from_user.id)),
+    )
     await callback.answer()
 
 
@@ -341,7 +381,22 @@ async def vpn_link_handler(
 
     link = xray_service.build_vless_link(str(user.uuid), user.telegram_id)
     await callback.message.edit_text(
-        f"🔗 Ваша постоянная VLESS-ссылка:\n\n<code>{escape(link)}</code>\n\nИнструкция по подключению на разных устройствах: https://t.me/kvpnpublic/2",
+        (
+            "🔐 <b>Мой VPN</b>\n\n"
+            "Для простого подключения на любом устройстве скачайте "
+            "<a href=\"https://happ.su\">Happ</a>.\n\n"
+            "<b>Инструкция по подключению:</b>\n"
+            "1) Скопируйте ваш VPN-ключ целиком (текст ниже).\n"
+            "2) Откройте Happ.\n"
+            "3) Нажмите на плюсик (+).\n"
+            "4) Выберите «Вставить из буфера».\n"
+            "5) Подключитесь к созданному профилю.\n\n"
+            "Ваш VPN-ключ:\n"
+            f"<code>{escape(link)}</code>\n\n"
+            "Если вы используете другое приложение, можно подключиться этим же ключом.\n\n"
+            "Доп. инструкция: https://t.me/kvpnpublic/2\n\n"
+            f"Техническая поддержка, если необходима помощь: {settings.support_url}"
+        ),
         reply_markup=main_menu(is_admin=settings.is_admin(callback.from_user.id)),
     )
     await callback.answer()
@@ -399,7 +454,10 @@ async def pay_shortcut(message: Message, settings: Settings, session: AsyncSessi
     if not await _ensure_access_for_message(message, session, settings, bot, user):
         return
     await message.answer(
-        f"Стоимость месяца: {Decimal(str(settings.month_price_rub))} ₽\nНажмите «Пополнить» в меню.",
+        (
+            f"Стоимость 1 месяца: {Decimal(str(settings.month_price_rub))} ₽\n"
+            "Нажмите «Купить VPN» в меню, чтобы выбрать тариф."
+        ),
         reply_markup=main_menu(is_admin=settings.is_admin(message.from_user.id)),
     )
 

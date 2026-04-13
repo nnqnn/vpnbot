@@ -7,6 +7,7 @@ from sqlalchemy import Select, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import (
+    DeferredTariffPurchase,
     Payment,
     PaymentStatus,
     Referral,
@@ -136,6 +137,44 @@ class PaymentRepository:
 
     async def mark_cancelled(self, payment: Payment) -> None:
         payment.status = PaymentStatus.cancelled
+
+
+class DeferredTariffPurchaseRepository:
+    def __init__(self, session: AsyncSession) -> None:
+        self.session = session
+
+    async def create(
+        self,
+        *,
+        user_id: int,
+        payment_id: int,
+        tariff_code: str,
+        tariff_price: Decimal,
+        tariff_days: int,
+    ) -> DeferredTariffPurchase:
+        record = DeferredTariffPurchase(
+            user_id=user_id,
+            payment_id=payment_id,
+            tariff_code=tariff_code,
+            tariff_price=tariff_price,
+            tariff_days=tariff_days,
+        )
+        self.session.add(record)
+        await self.session.flush()
+        return record
+
+    async def list_pending(self, limit: int = 200) -> list[DeferredTariffPurchase]:
+        query: Select[tuple[DeferredTariffPurchase]] = (
+            select(DeferredTariffPurchase)
+            .where(
+                DeferredTariffPurchase.applied_at.is_(None),
+                DeferredTariffPurchase.cancelled_at.is_(None),
+            )
+            .order_by(DeferredTariffPurchase.created_at.asc())
+            .limit(limit)
+        )
+        result = await self.session.execute(query)
+        return list(result.scalars().all())
 
 
 class ReferralRepository:
