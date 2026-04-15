@@ -36,6 +36,7 @@ class TariffPlan:
     title: str
     price: Decimal
     days: int
+    kind: str = "subscription"
 
 
 class BillingService:
@@ -53,9 +54,16 @@ class BillingService:
 
     def list_tariffs(self) -> tuple[TariffPlan, ...]:
         return (
-            TariffPlan(code="1m", title="1 месяц", price=Decimal("100"), days=30),
-            TariffPlan(code="3m", title="3 месяца", price=Decimal("270"), days=90),
-            TariffPlan(code="12m", title="12 месяцев", price=Decimal("990"), days=365),
+            TariffPlan(code="1m", title="1 месяц", price=Decimal("100"), days=30, kind="subscription"),
+            TariffPlan(code="3m", title="3 месяца", price=Decimal("270"), days=90, kind="subscription"),
+            TariffPlan(code="12m", title="12 месяцев", price=Decimal("990"), days=365, kind="subscription"),
+            TariffPlan(
+                code="wl_guide",
+                title="Инструкция по обходу белых списков",
+                price=Decimal("120"),
+                days=0,
+                kind="instruction",
+            ),
         )
 
     def get_tariff(self, code: str) -> TariffPlan | None:
@@ -66,10 +74,11 @@ class BillingService:
 
     def build_tariffs_text(self) -> str:
         return (
-            "💳 Выберите тариф VPN:\n\n"
+            "💳 Выберите тариф/продукт:\n\n"
             "• 1 месяц — 100 ₽\n"
             "• 3 месяца — 270 ₽\n"
-            "• 12 месяцев — 990 ₽ (-20%)\n\n"
+            "• 12 месяцев — 990 ₽ (-20%)\n"
+            "• Инструкция по обходу белых списков — 120 ₽"
         )
 
     async def purchase_tariff(
@@ -87,6 +96,10 @@ class BillingService:
             return "error", "Покупка недоступна: ваш аккаунт заблокирован.", None
 
         if user.balance >= tariff.price:
+            if tariff.kind == "instruction":
+                await self._apply_instruction_purchase(user=user, price=tariff.price)
+                await session.flush()
+                return "applied", self._instruction_delivery_text(user.balance), None
             await self._charge_subscription(
                 session=session,
                 user=user,
@@ -128,7 +141,7 @@ class BillingService:
             "payment_required",
             (
                 f"Сумма платежа: {payment_amount} ₽{reserve_note}\n\n"
-                "После успешной оплаты тариф активируется автоматически."
+                "После успешной оплаты продукт активируется автоматически."
             ),
             payment_url,
         )
@@ -264,6 +277,18 @@ class BillingService:
                     )
                     continue
 
+                tariff = self.get_tariff(purchase.tariff_code)
+                if tariff and tariff.kind == "instruction":
+                    await self._apply_instruction_purchase(user=user, price=purchase.tariff_price)
+                    purchase.applied_at = now
+                    applied += 1
+                    await self._safe_send(
+                        bot,
+                        user.telegram_id,
+                        self._instruction_delivery_text(user.balance),
+                    )
+                    continue
+
                 await self._charge_subscription(
                     session=session,
                     user=user,
@@ -274,7 +299,6 @@ class BillingService:
                 )
                 purchase.applied_at = now
                 applied += 1
-                tariff = self.get_tariff(purchase.tariff_code)
                 tariff_title = tariff.title if tariff else f"{purchase.tariff_days} дней"
                 await self._safe_send(
                     bot,
@@ -417,6 +441,17 @@ class BillingService:
 
         await self._record_subscription_payment(session, user, source=source)
         await self._maybe_apply_referral_year_reward(session, invited_user=user, bot=bot)
+
+    async def _apply_instruction_purchase(self, user: User, *, price: Decimal) -> None:
+        user.balance -= price
+
+    def _instruction_delivery_text(self, balance_after_charge: Decimal) -> str:
+        return (
+            "✅ Покупка успешна: «Инструкция по обходу белых списков».\n"
+            "Ссылка на инструкцию:\n"
+            f"{self.settings.whitelist_instruction_url}\n\n"
+            f"Баланс: {balance_after_charge} ₽"
+        )
 
     def _payment_amount_for_shortage(self, shortage: Decimal) -> int:
         min_amount = Decimal(str(self.settings.payment_min_amount))

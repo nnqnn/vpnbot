@@ -68,6 +68,10 @@ class Settings(BaseSettings):
         default="https://telegra.ph/Pravila-servisa-kVPN-i-politika-konfidencialnosti-04-05",
         alias="RULES_URL",
     )
+    whitelist_instruction_url: str = Field(
+        default="https://telegra.ph/Instrukciya-po-obhodu-belyh-spiskov-04-15",
+        alias="WHITELIST_INSTRUCTION_URL",
+    )
 
     def is_admin(self, telegram_id: int) -> bool:
         return telegram_id == self.super_admin_id

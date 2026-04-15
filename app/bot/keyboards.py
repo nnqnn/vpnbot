@@ -61,6 +61,7 @@ def vpn_tariffs_menu() -> InlineKeyboardMarkup:
     kb.button(text="1 месяц — 100 ₽", callback_data="tariff:1m")
     kb.button(text="3 месяца — 270 ₽", callback_data="tariff:3m")
     kb.button(text="12 месяцев — 990 ₽ (-20%)", callback_data="tariff:12m")
+    kb.button(text="Обход белых списков — 120 ₽", callback_data="tariff:wl_guide")
     kb.button(text="⬅️ Назад", callback_data="menu:back")
     kb.adjust(1)
     return kb.as_markup()
