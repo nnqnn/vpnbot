@@ -36,6 +36,7 @@ def admin_menu() -> InlineKeyboardMarkup:
     kb.button(text="👥 Список пользователей", callback_data="admin:list_users")
     kb.button(text="💳 Баланс пользователя", callback_data="admin:get_balance")
     kb.button(text="📡 Онлайн VPN", callback_data="admin:vpn_online_count")
+    kb.button(text="🤝 Партнерские ссылки", callback_data="admin:partners")
     kb.button(text="➕ Выдать дни", callback_data="admin:add_days")
     kb.button(text="🌍 Выдать дни всем", callback_data="admin:add_days_all")
     kb.button(text="➖ Отнять дни", callback_data="admin:remove_days")
@@ -44,7 +45,7 @@ def admin_menu() -> InlineKeyboardMarkup:
     kb.button(text="🎁 Выдать бонус", callback_data="admin:bonus")
     kb.button(text="📣 Массовая рассылка", callback_data="admin:broadcast")
     kb.button(text="⬅️ В меню", callback_data="menu:back")
-    kb.adjust(1, 1, 1, 2, 2, 2, 1, 1)
+    kb.adjust(1, 1, 1, 1, 2, 2, 2, 1, 1)
     return kb.as_markup()
 
 
@@ -52,6 +53,15 @@ def payment_link_menu(payment_url: str) -> InlineKeyboardMarkup:
     kb = InlineKeyboardBuilder()
     kb.button(text="💸 Перейти к оплате", url=payment_url)
     kb.button(text="⬅️ Назад", callback_data="menu:back")
+    kb.adjust(1)
+    return kb.as_markup()
+
+
+def admin_partners_menu() -> InlineKeyboardMarkup:
+    kb = InlineKeyboardBuilder()
+    kb.button(text="➕ Создать партнерскую ссылку", callback_data="admin:partner_create")
+    kb.button(text="🔄 Обновить статистику", callback_data="admin:partners")
+    kb.button(text="⬅️ В админку", callback_data="admin:open")
     kb.adjust(1)
     return kb.as_markup()
 

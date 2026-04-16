@@ -10,3 +10,4 @@ class AdminStates(StatesGroup):
     wait_unban_user = State()
     wait_bonus = State()
     wait_broadcast_text = State()
+    wait_partner_label = State()

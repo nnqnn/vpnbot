@@ -8,6 +8,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import (
     DeferredTariffPurchase,
+    PartnerReferralClick,
+    PartnerReferralLead,
+    PartnerReferralLink,
     Payment,
     PaymentStatus,
     Referral,
@@ -175,6 +178,81 @@ class DeferredTariffPurchaseRepository:
         )
         result = await self.session.execute(query)
         return list(result.scalars().all())
+
+
+class PartnerReferralLinkRepository:
+    def __init__(self, session: AsyncSession) -> None:
+        self.session = session
+
+    async def get_by_code(self, code: str) -> PartnerReferralLink | None:
+        query: Select[tuple[PartnerReferralLink]] = select(PartnerReferralLink).where(PartnerReferralLink.code == code)
+        result = await self.session.execute(query)
+        return result.scalar_one_or_none()
+
+    async def create(self, *, code: str, label: str) -> PartnerReferralLink:
+        link = PartnerReferralLink(code=code, label=label)
+        self.session.add(link)
+        await self.session.flush()
+        return link
+
+    async def list_links(self, limit: int = 30) -> list[PartnerReferralLink]:
+        query: Select[tuple[PartnerReferralLink]] = (
+            select(PartnerReferralLink)
+            .order_by(PartnerReferralLink.created_at.desc())
+            .limit(limit)
+        )
+        result = await self.session.execute(query)
+        return list(result.scalars().all())
+
+    async def ensure_click(self, *, link_id: int, telegram_id: int) -> None:
+        query: Select[tuple[PartnerReferralClick]] = select(PartnerReferralClick).where(
+            PartnerReferralClick.partner_referral_link_id == link_id,
+            PartnerReferralClick.telegram_id == telegram_id,
+        )
+        result = await self.session.execute(query)
+        if result.scalar_one_or_none() is not None:
+            return
+        self.session.add(PartnerReferralClick(partner_referral_link_id=link_id, telegram_id=telegram_id))
+        await self.session.flush()
+
+    async def ensure_lead(self, *, link_id: int, user_id: int) -> None:
+        query: Select[tuple[PartnerReferralLead]] = select(PartnerReferralLead).where(
+            PartnerReferralLead.user_id == user_id
+        )
+        result = await self.session.execute(query)
+        if result.scalar_one_or_none() is not None:
+            return
+        self.session.add(PartnerReferralLead(partner_referral_link_id=link_id, user_id=user_id))
+        await self.session.flush()
+
+    async def count_unique_clicks(self, link_id: int) -> int:
+        result = await self.session.execute(
+            select(func.count(PartnerReferralClick.id)).where(
+                PartnerReferralClick.partner_referral_link_id == link_id
+            )
+        )
+        return int(result.scalar_one() or 0)
+
+    async def count_paid_leads(self, link_id: int) -> int:
+        query = (
+            select(func.count(func.distinct(PartnerReferralLead.user_id)))
+            .join(Payment, Payment.user_id == PartnerReferralLead.user_id)
+            .where(
+                PartnerReferralLead.partner_referral_link_id == link_id,
+                Payment.status == PaymentStatus.paid,
+            )
+        )
+        result = await self.session.execute(query)
+        return int(result.scalar_one() or 0)
+
+    async def list_with_stats(self, limit: int = 30) -> list[tuple[PartnerReferralLink, int, int]]:
+        links = await self.list_links(limit=limit)
+        stats: list[tuple[PartnerReferralLink, int, int]] = []
+        for link in links:
+            clicks = await self.count_unique_clicks(link.id)
+            paid = await self.count_paid_leads(link.id)
+            stats.append((link, clicks, paid))
+        return stats
 
 
 class ReferralRepository:

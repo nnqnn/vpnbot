@@ -3,6 +3,7 @@ from __future__ import annotations
 import re
 from collections import deque
 from decimal import Decimal, InvalidOperation
+from html import escape as html_escape
 from pathlib import Path
 
 from aiogram import F, Router
@@ -11,11 +12,12 @@ from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.bot.keyboards import admin_menu
+from app.bot.keyboards import admin_menu, admin_partners_menu
 from app.bot.states import AdminStates
 from app.config import Settings
-from app.db.repositories import ReferralRepository, UserRepository
+from app.db.repositories import PartnerReferralLinkRepository, ReferralRepository, UserRepository
 from app.services.admin_service import AdminService
+from app.utils.security import generate_referral_code
 from app.utils.time import human_remaining, utc_now
 
 admin_router = Router(name="admin-router")
@@ -53,6 +55,47 @@ def _status_short(user) -> str:
     if user.device_limit_blocked:
         return "lim"
     return "y" if user.vpn_enabled else "n"
+
+
+async def _generate_unique_partner_code(session: AsyncSession) -> str:
+    user_repo = UserRepository(session)
+    partner_repo = PartnerReferralLinkRepository(session)
+    for _ in range(40):
+        code = generate_referral_code()
+        if await user_repo.get_by_referral_code(code) is not None:
+            continue
+        if await partner_repo.get_by_code(code) is not None:
+            continue
+        return code
+    raise RuntimeError("Could not generate unique partner referral code")
+
+
+async def _build_partner_links_text(
+    session: AsyncSession,
+    *,
+    bot_username: str,
+    limit: int = 30,
+) -> str:
+    stats = await PartnerReferralLinkRepository(session).list_with_stats(limit=limit)
+    if not stats:
+        return (
+            "🤝 Партнерские ссылки\n\n"
+            "Ссылок пока нет.\n"
+            "Нажмите «Создать партнерскую ссылку»."
+        )
+
+    lines = []
+    for link, clicks, paid in stats:
+        url = f"https://t.me/{bot_username}?start=ref_{link.code}"
+        lines.append(
+            (
+                f"{html_escape(link.label)} | ref_{link.code}\n"
+                f"Перешло: {clicks} | Оплатило: {paid}\n"
+                f"{url}"
+            )
+        )
+
+    return "🤝 Партнерские ссылки\n\n" + "\n\n".join(lines)
 
 
 def _count_online_users_from_access_log(log_path: Path, max_lines: int = 200) -> tuple[int, int] | None:
@@ -102,6 +145,31 @@ async def admin_open(callback: CallbackQuery, settings: Settings) -> None:
         await _deny_callback(callback)
         return
     await callback.message.edit_text("Админ-панель:", reply_markup=admin_menu())
+    await callback.answer()
+
+
+@admin_router.callback_query(F.data == "admin:partners")
+async def admin_partners(callback: CallbackQuery, session: AsyncSession, settings: Settings) -> None:
+    if not await _is_admin(callback.from_user.id, settings):
+        await _deny_callback(callback)
+        return
+    bot_info = await callback.bot.get_me()
+    bot_username = bot_info.username or "your_bot"
+    text = await _build_partner_links_text(session, bot_username=bot_username, limit=30)
+    await callback.message.edit_text(text[:3900], reply_markup=admin_partners_menu())
+    await callback.answer()
+
+
+@admin_router.callback_query(F.data == "admin:partner_create")
+async def admin_partner_create(callback: CallbackQuery, state: FSMContext, settings: Settings) -> None:
+    if not await _is_admin(callback.from_user.id, settings):
+        await _deny_callback(callback)
+        return
+    await state.set_state(AdminStates.wait_partner_label)
+    await callback.message.edit_text(
+        "Введите название партнерки (пример: channel_news_01):",
+        reply_markup=admin_partners_menu(),
+    )
     await callback.answer()
 
 
@@ -248,6 +316,44 @@ async def admin_cancel(message: Message, state: FSMContext, settings: Settings) 
         return
     await state.clear()
     await message.answer("Отменено.", reply_markup=admin_menu())
+
+
+@admin_router.message(AdminStates.wait_partner_label)
+async def process_partner_label(
+    message: Message,
+    state: FSMContext,
+    session: AsyncSession,
+    settings: Settings,
+) -> None:
+    if not await _is_admin(message.from_user.id, settings):
+        await _deny_message(message)
+        return
+
+    label = (message.text or "").strip()
+    if not label:
+        await message.answer("Название не должно быть пустым. Введите название партнерки.")
+        return
+    if len(label) > 255:
+        await message.answer("Слишком длинное название. Используйте до 255 символов.")
+        return
+
+    code = await _generate_unique_partner_code(session)
+    link = await PartnerReferralLinkRepository(session).create(code=code, label=label)
+
+    bot_info = await message.bot.get_me()
+    bot_username = bot_info.username or "your_bot"
+    partner_url = f"https://t.me/{bot_username}?start=ref_{link.code}"
+    await message.answer(
+        (
+            "✅ Партнерская ссылка создана.\n\n"
+            f"Название: {html_escape(link.label)}\n"
+            f"Код: {link.code}\n"
+            f"Ссылка: {partner_url}\n\n"
+            "Формат такой же, как у обычной реферальной ссылки."
+        ),
+        reply_markup=admin_partners_menu(),
+    )
+    await state.clear()
 
 
 @admin_router.message(AdminStates.wait_balance_user)

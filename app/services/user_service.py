@@ -7,8 +7,8 @@ from decimal import Decimal
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import Settings
-from app.db.models import User, UserStatus
-from app.db.repositories import ReferralRepository, UserRepository
+from app.db.models import PartnerReferralLink, User, UserStatus
+from app.db.repositories import PartnerReferralLinkRepository, ReferralRepository, UserRepository
 from app.services.xray_service import XrayService
 from app.utils.security import generate_referral_code
 from app.utils.time import human_remaining, localize, utc_now
@@ -30,11 +30,15 @@ class UserService:
     ) -> tuple[User, bool, int | None]:
         user_repo = UserRepository(session)
         referral_repo = ReferralRepository(session)
+        partner_repo = PartnerReferralLinkRepository(session)
+        partner_link = await self._resolve_partner_link(session, start_param=start_param)
 
         user = await user_repo.get_by_telegram_id(telegram_id)
         if user:
             if username and user.username != username:
                 user.username = username
+            if partner_link is not None:
+                await partner_repo.ensure_click(link_id=partner_link.id, telegram_id=telegram_id)
             return user, False, None
 
         inviter = await self._resolve_inviter(session, start_param=start_param, telegram_id=telegram_id)
@@ -59,6 +63,10 @@ class UserService:
             self.extend_user_days(inviter, self.settings.referral_bonus_days)
             inviter.warning_sent_at = None
             inviter_telegram_id = inviter.telegram_id
+
+        if partner_link is not None:
+            await partner_repo.ensure_click(link_id=partner_link.id, telegram_id=telegram_id)
+            await partner_repo.ensure_lead(link_id=partner_link.id, user_id=user.id)
 
         await session.flush()
         return user, True, inviter_telegram_id
@@ -119,9 +127,7 @@ class UserService:
         start_param: str | None,
         telegram_id: int,
     ) -> User | None:
-        if not start_param or not start_param.startswith("ref_"):
-            return None
-        code = start_param.removeprefix("ref_").strip()
+        code = self._extract_referral_code(start_param)
         if not code:
             return None
 
@@ -133,13 +139,36 @@ class UserService:
             return None
         return inviter
 
+    async def _resolve_partner_link(
+        self,
+        session: AsyncSession,
+        start_param: str | None,
+    ) -> PartnerReferralLink | None:
+        code = self._extract_referral_code(start_param)
+        if not code:
+            return None
+        return await PartnerReferralLinkRepository(session).get_by_code(code)
+
     async def _generate_unique_referral_code(self, session: AsyncSession) -> str:
         user_repo = UserRepository(session)
+        partner_repo = PartnerReferralLinkRepository(session)
         for _ in range(20):
             code = generate_referral_code()
-            if await user_repo.get_by_referral_code(code) is None:
-                return code
+            if await user_repo.get_by_referral_code(code) is not None:
+                continue
+            if await partner_repo.get_by_code(code) is not None:
+                continue
+            return code
         raise RuntimeError("Could not generate unique referral code")
+
+    @staticmethod
+    def _extract_referral_code(start_param: str | None) -> str | None:
+        if not start_param or not start_param.startswith("ref_"):
+            return None
+        code = start_param.removeprefix("ref_").strip()
+        if not code:
+            return None
+        return code
 
     @staticmethod
     def _new_uuid():

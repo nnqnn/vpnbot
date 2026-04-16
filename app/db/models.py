@@ -90,6 +90,49 @@ class DeferredTariffPurchase(Base):
     cancelled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
+class PartnerReferralLink(Base):
+    __tablename__ = "partner_referral_links"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    code: Mapped[str] = mapped_column(String(32), unique=True, nullable=False, index=True)
+    label: Mapped[str] = mapped_column(String(255), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
+class PartnerReferralClick(Base):
+    __tablename__ = "partner_referral_clicks"
+    __table_args__ = (
+        UniqueConstraint(
+            "partner_referral_link_id",
+            "telegram_id",
+            name="uq_partner_referral_clicks_link_telegram",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    partner_referral_link_id: Mapped[int] = mapped_column(
+        ForeignKey("partner_referral_links.id"),
+        nullable=False,
+        index=True,
+    )
+    telegram_id: Mapped[int] = mapped_column(BIGINT, nullable=False, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
+class PartnerReferralLead(Base):
+    __tablename__ = "partner_referral_leads"
+    __table_args__ = (UniqueConstraint("user_id", name="uq_partner_referral_leads_user_id"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    partner_referral_link_id: Mapped[int] = mapped_column(
+        ForeignKey("partner_referral_links.id"),
+        nullable=False,
+        index=True,
+    )
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
 class Referral(Base):
     __tablename__ = "referrals"
     __table_args__ = (UniqueConstraint("invited_id", name="uq_referrals_invited_id"),)
