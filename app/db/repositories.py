@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 
-from sqlalchemy import Select, func, select
+from sqlalchemy import Select, case, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import (
@@ -21,6 +22,29 @@ from app.db.models import (
     UserPolicy,
     UserStatus,
 )
+
+
+@dataclass(frozen=True, slots=True)
+class UserWithReferralStats:
+    user: User
+    referrals_count: int
+    paid_referrals_count: int
+
+
+@dataclass(frozen=True, slots=True)
+class UserSummaryStats:
+    total_users: int
+    active_users: int
+    banned_users: int
+    vpn_enabled_users: int
+    device_limit_blocked_users: int
+    active_subscription_users: int
+    expired_or_without_subscription_users: int
+    total_balance: Decimal
+    total_referrals: int
+    paid_referrals: int
+    paid_payments: int
+    paid_payments_amount: Decimal
 
 
 class UserRepository:
@@ -58,10 +82,125 @@ class UserRepository:
         result = await self.session.execute(query)
         return list(result.scalars().all())
 
+    async def list_users_with_referral_stats(
+        self,
+        *,
+        limit: int | None = 50,
+        offset: int = 0,
+    ) -> list[UserWithReferralStats]:
+        referrals_sq = (
+            select(
+                Referral.inviter_id.label("user_id"),
+                func.count(Referral.id).label("referrals_count"),
+            )
+            .group_by(Referral.inviter_id)
+            .subquery()
+        )
+        paid_referrals_sq = (
+            select(
+                Referral.inviter_id.label("user_id"),
+                func.count(func.distinct(Referral.invited_id)).label("paid_referrals_count"),
+            )
+            .join(SubscriptionCharge, SubscriptionCharge.user_id == Referral.invited_id)
+            .group_by(Referral.inviter_id)
+            .subquery()
+        )
+        query = (
+            select(
+                User,
+                func.coalesce(referrals_sq.c.referrals_count, 0),
+                func.coalesce(paid_referrals_sq.c.paid_referrals_count, 0),
+            )
+            .outerjoin(referrals_sq, referrals_sq.c.user_id == User.id)
+            .outerjoin(paid_referrals_sq, paid_referrals_sq.c.user_id == User.id)
+            .order_by(User.created_at.desc())
+            .offset(offset)
+        )
+        if limit is not None:
+            query = query.limit(limit)
+
+        result = await self.session.execute(query)
+        return [
+            UserWithReferralStats(
+                user=user,
+                referrals_count=int(referrals_count or 0),
+                paid_referrals_count=int(paid_referrals_count or 0),
+            )
+            for user, referrals_count, paid_referrals_count in result.all()
+        ]
+
     async def list_all_users(self) -> list[User]:
         query: Select[tuple[User]] = select(User).order_by(User.id.asc())
         result = await self.session.execute(query)
         return list(result.scalars().all())
+
+    async def user_summary_stats(self, now: datetime) -> UserSummaryStats:
+        users_result = await self.session.execute(
+            select(
+                func.count(User.id),
+                func.coalesce(func.sum(case((User.status == UserStatus.active, 1), else_=0)), 0),
+                func.coalesce(func.sum(case((User.status == UserStatus.banned, 1), else_=0)), 0),
+                func.coalesce(func.sum(case((User.vpn_enabled.is_(True), 1), else_=0)), 0),
+                func.coalesce(func.sum(case((User.device_limit_blocked.is_(True), 1), else_=0)), 0),
+                func.coalesce(func.sum(case((User.expiration_date > now, 1), else_=0)), 0),
+                func.coalesce(
+                    func.sum(
+                        case(
+                            (
+                                or_(
+                                    User.expiration_date.is_(None),
+                                    User.expiration_date <= now,
+                                ),
+                                1,
+                            ),
+                            else_=0,
+                        )
+                    ),
+                    0,
+                ),
+                func.coalesce(func.sum(User.balance), Decimal("0.00")),
+            )
+        )
+        (
+            total_users,
+            active_users,
+            banned_users,
+            vpn_enabled_users,
+            device_limit_blocked_users,
+            active_subscription_users,
+            expired_or_without_subscription_users,
+            total_balance,
+        ) = users_result.one()
+
+        referrals_result = await self.session.execute(select(func.count(Referral.id)))
+        paid_referrals_result = await self.session.execute(
+            select(func.count(func.distinct(Referral.invited_id))).join(
+                SubscriptionCharge,
+                SubscriptionCharge.user_id == Referral.invited_id,
+            )
+        )
+        paid_payments_result = await self.session.execute(
+            select(
+                func.count(Payment.id),
+                func.coalesce(func.sum(Payment.amount), Decimal("0.00")),
+            ).where(Payment.status == PaymentStatus.paid)
+        )
+        paid_payments, paid_payments_amount = paid_payments_result.one()
+
+        return UserSummaryStats(
+            total_users=int(total_users or 0),
+            active_users=int(active_users or 0),
+            banned_users=int(banned_users or 0),
+            vpn_enabled_users=int(vpn_enabled_users or 0),
+            device_limit_blocked_users=int(device_limit_blocked_users or 0),
+            active_subscription_users=int(active_subscription_users or 0),
+            expired_or_without_subscription_users=int(expired_or_without_subscription_users or 0),
+            total_balance=total_balance or Decimal("0.00"),
+            total_referrals=int(referrals_result.scalar_one() or 0),
+            paid_referrals=int(paid_referrals_result.scalar_one() or 0),
+            paid_payments=int(paid_payments or 0),
+            paid_payments_amount=paid_payments_amount or Decimal("0.00"),
+        )
 
     async def users_for_auto_renew(self, now: datetime) -> list[User]:
         query: Select[tuple[User]] = select(User).where(

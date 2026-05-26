@@ -2,23 +2,30 @@ from __future__ import annotations
 
 import re
 from collections import deque
+from datetime import datetime
 from decimal import Decimal, InvalidOperation
 from html import escape as html_escape
 from pathlib import Path
+from typing import Any
 
 from aiogram import F, Router
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
-from aiogram.types import CallbackQuery, Message
+from aiogram.types import BufferedInputFile, CallbackQuery, Message
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.bot.keyboards import admin_menu, admin_partners_menu
 from app.bot.states import AdminStates
 from app.config import Settings
-from app.db.repositories import PartnerReferralLinkRepository, ReferralRepository, UserRepository
+from app.db.repositories import (
+    PartnerReferralLinkRepository,
+    UserRepository,
+    UserSummaryStats,
+    UserWithReferralStats,
+)
 from app.services.admin_service import AdminService
 from app.utils.security import generate_referral_code
-from app.utils.time import human_remaining, utc_now
+from app.utils.time import human_remaining, localize, utc_now
 
 admin_router = Router(name="admin-router")
 ACCESS_EMAIL_PATTERN = re.compile(r"email[:=]\s*(?P<email>[^\s,\]]+)")
@@ -55,6 +62,76 @@ def _status_short(user) -> str:
     if user.device_limit_blocked:
         return "lim"
     return "y" if user.vpn_enabled else "n"
+
+
+def _format_user_list_line(
+    user: Any,
+    *,
+    referrals_count: int,
+    paid_referrals_count: int,
+    timezone_name: str,
+) -> str:
+    expires = human_remaining(user.expiration_date, timezone_name) if user.expiration_date else "0"
+    return (
+        f"{user.telegram_id} | {_username(user)} | {user.balance} ₽ | "
+        f"ref:{referrals_count} paid:{paid_referrals_count} | {expires} | {_status_short(user)}"
+    )
+
+
+def _format_user_rows(rows: list[UserWithReferralStats], timezone_name: str) -> list[str]:
+    return [
+        _format_user_list_line(
+            row.user,
+            referrals_count=row.referrals_count,
+            paid_referrals_count=row.paid_referrals_count,
+            timezone_name=timezone_name,
+        )
+        for row in rows
+    ]
+
+
+def _format_money(value: Decimal) -> str:
+    return f"{value.quantize(Decimal('0.01'))} ₽"
+
+
+def _users_export_filename(now: datetime) -> str:
+    return f"users_export_{now:%Y%m%d_%H%M%S}.txt"
+
+
+def _build_users_summary_text(summary: UserSummaryStats) -> str:
+    return (
+        "📄 Все пользователи\n\n"
+        "Краткая выжимка:\n"
+        f"Всего пользователей: {summary.total_users}\n"
+        f"Активных / забаненных: {summary.active_users} / {summary.banned_users}\n"
+        f"VPN включен: {summary.vpn_enabled_users}\n"
+        f"Заблокированы лимитом: {summary.device_limit_blocked_users}\n"
+        f"С активным сроком: {summary.active_subscription_users}\n"
+        f"Истекшие или без срока: {summary.expired_or_without_subscription_users}\n"
+        f"Суммарный баланс: {_format_money(summary.total_balance)}\n"
+        f"Рефералов всего: {summary.total_referrals}\n"
+        f"Оплативших рефералов: {summary.paid_referrals}\n"
+        f"Оплаченных платежей: {summary.paid_payments}\n"
+        f"Сумма оплат: {_format_money(summary.paid_payments_amount)}\n\n"
+        "Полный список отправлен файлом ниже."
+    )
+
+
+def _build_users_export_text(
+    rows: list[UserWithReferralStats],
+    *,
+    generated_at: datetime,
+    timezone_name: str,
+) -> str:
+    generated_at_text = localize(generated_at, timezone_name).strftime("%d.%m.%Y %H:%M:%S")
+    header = [
+        "Все пользователи",
+        f"Сформировано: {generated_at_text}",
+        "Формат: telegram_id | username | balance | ref:N paid:N | expires | status",
+        "Статусы: y=VPN включен, n=VPN выключен, ban=забанен, lim=лимит устройств",
+        "",
+    ]
+    return "\n".join(header + _format_user_rows(rows, timezone_name)) + "\n"
 
 
 async def _generate_unique_partner_code(session: AsyncSession) -> str:
@@ -179,26 +256,40 @@ async def admin_list_users(callback: CallbackQuery, session: AsyncSession, setti
         await _deny_callback(callback)
         return
     user_repo = UserRepository(session)
-    referral_repo = ReferralRepository(session)
-    users = await user_repo.list_users(limit=50)
-    if not users:
+    rows = await user_repo.list_users_with_referral_stats(limit=50)
+    if not rows:
         await callback.message.edit_text("Пользователей пока нет.", reply_markup=admin_menu())
         await callback.answer()
         return
-    lines = []
-    for user in users:
-        expires = human_remaining(user.expiration_date, settings.timezone) if user.expiration_date else "0"
-        referrals_count = await user_repo.count_referrals(user.id)
-        paid_referrals_count = await referral_repo.count_invited_with_subscription_payment(user.id)
-        lines.append(
-            (
-                f"{user.telegram_id} | {_username(user)} | {user.balance} ₽ | "
-                f"ref:{referrals_count} paid:{paid_referrals_count} | {expires} | {_status_short(user)}"
-            )
-        )
+    lines = _format_user_rows(rows, settings.timezone)
     text = "👥 Пользователи (последние 50):\n\n" + "\n".join(lines)
     await callback.message.edit_text(text[:3900], reply_markup=admin_menu())
     await callback.answer()
+
+
+@admin_router.callback_query(F.data == "admin:export_users")
+async def admin_export_users(callback: CallbackQuery, session: AsyncSession, settings: Settings) -> None:
+    if not await _is_admin(callback.from_user.id, settings):
+        await _deny_callback(callback)
+        return
+    await callback.answer("Готовлю файл...")
+
+    user_repo = UserRepository(session)
+    rows = await user_repo.list_users_with_referral_stats(limit=None)
+    if not rows:
+        await callback.message.edit_text("Пользователей пока нет.", reply_markup=admin_menu())
+        return
+
+    now = utc_now()
+    summary = await user_repo.user_summary_stats(now)
+    export_text = _build_users_export_text(rows, generated_at=now, timezone_name=settings.timezone)
+    document = BufferedInputFile(
+        export_text.encode("utf-8"),
+        filename=_users_export_filename(localize(now, settings.timezone)),
+    )
+
+    await callback.message.edit_text(_build_users_summary_text(summary), reply_markup=admin_menu())
+    await callback.message.answer_document(document=document, caption="Полный список пользователей")
 
 
 @admin_router.callback_query(F.data == "admin:vpn_online_count")
