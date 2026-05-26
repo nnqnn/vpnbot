@@ -121,12 +121,6 @@ log() {
 
 cd "$server_dir"
 
-if ! git diff --quiet --ignore-submodules -- || ! git diff --cached --quiet --ignore-submodules --; then
-  echo "Server tracked working tree is dirty. Refusing to deploy." >&2
-  git status --short
-  exit 1
-fi
-
 if ! systemctl is-active --quiet xray; then
   echo "xray.service is not active. Refusing to deploy bot changes." >&2
   systemctl status xray --no-pager || true
@@ -148,12 +142,41 @@ if [[ -z "$remote_name" ]]; then
 fi
 
 previous_commit="$(git rev-parse HEAD)"
+server_stash_name=""
+server_stash_ref=""
+
+stash_server_changes_if_needed() {
+  local status
+  status="$(git status --porcelain --untracked-files=all)"
+  if [[ -z "$status" ]]; then
+    log "Server working tree is clean"
+    return
+  fi
+
+  server_stash_name="pre-deploy-${branch}-$(date +'%Y%m%d_%H%M%S')"
+  log "Saving server working tree changes to git stash"
+  printf '%s\n' "$status"
+  git stash push --include-untracked -m "$server_stash_name"
+  server_stash_ref="$(git stash list --format='%gd' -n 1)"
+
+  if [[ -n "$(git status --porcelain --untracked-files=all)" ]]; then
+    echo "Server working tree is still dirty after stash. Refusing to deploy." >&2
+    git status --short
+    exit 1
+  fi
+
+  echo "Server changes saved as stash: ${server_stash_ref} (${server_stash_name})"
+}
 
 rollback() {
   local reason="$1"
   echo "$reason" >&2
   echo "Rolling back to $previous_commit" >&2
   git reset --hard "$previous_commit"
+  if [[ -n "$server_stash_ref" ]]; then
+    echo "Restoring server pre-deploy stash: $server_stash_ref ($server_stash_name)" >&2
+    git stash apply "$server_stash_ref" || true
+  fi
   if [[ -x ".venv/bin/python" ]]; then
     ".venv/bin/python" -m pip install -r requirements.txt || true
     ".venv/bin/python" -m compileall -q app scripts || true
@@ -164,6 +187,8 @@ rollback() {
     systemctl status "$service" --no-pager || true
   fi
 }
+
+stash_server_changes_if_needed
 
 log "Fetching ${branch} from ${remote_name}"
 git fetch "$remote_name" "$branch"
