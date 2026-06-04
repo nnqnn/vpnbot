@@ -15,6 +15,7 @@ from app.db.models import PaymentStatus, SubscriptionChargeSource, User, UserSta
 from app.db.repositories import (
     DeferredTariffPurchaseRepository,
     PaymentRepository,
+    ProductPurchaseRepository,
     ReferralRepository,
     ReferralYearRewardRepository,
     SubscriptionChargeRepository,
@@ -28,6 +29,7 @@ if TYPE_CHECKING:
     from app.services.payment_service import TelegaPayService
 
 logger = logging.getLogger(__name__)
+WHITELIST_PRODUCT_CODE = "wl_guide"
 
 
 @dataclass(frozen=True)
@@ -58,7 +60,7 @@ class BillingService:
             TariffPlan(code="3m", title="3 месяца", price=Decimal("270"), days=90, kind="subscription"),
             TariffPlan(code="12m", title="12 месяцев", price=Decimal("990"), days=365, kind="subscription"),
             TariffPlan(
-                code="wl_guide",
+                code=WHITELIST_PRODUCT_CODE,
                 title="Инструкция по обходу белых списков",
                 price=Decimal("120"),
                 days=0,
@@ -98,7 +100,13 @@ class BillingService:
 
         if user.balance >= tariff.price:
             if tariff.kind == "instruction":
-                await self._apply_instruction_purchase(user=user, price=tariff.price)
+                await self._apply_instruction_purchase(
+                    session=session,
+                    user=user,
+                    product_code=tariff.code,
+                    price=tariff.price,
+                    source="balance",
+                )
                 await session.flush()
                 return "applied", self._instruction_delivery_text(user.balance), None
             await self._charge_subscription(
@@ -280,7 +288,14 @@ class BillingService:
 
                 tariff = self.get_tariff(purchase.tariff_code)
                 if tariff and tariff.kind == "instruction":
-                    await self._apply_instruction_purchase(user=user, price=purchase.tariff_price)
+                    await self._apply_instruction_purchase(
+                        session=session,
+                        user=user,
+                        product_code=tariff.code,
+                        price=purchase.tariff_price,
+                        source="deferred_payment",
+                        payment_id=purchase.payment_id,
+                    )
                     purchase.applied_at = now
                     applied += 1
                     await self._safe_send(
@@ -443,8 +458,24 @@ class BillingService:
         await self._record_subscription_payment(session, user, source=source)
         await self._maybe_apply_referral_year_reward(session, invited_user=user, bot=bot)
 
-    async def _apply_instruction_purchase(self, user: User, *, price: Decimal) -> None:
+    async def _apply_instruction_purchase(
+        self,
+        session: AsyncSession,
+        user: User,
+        *,
+        product_code: str,
+        price: Decimal,
+        source: str,
+        payment_id: int | None = None,
+    ) -> None:
         user.balance -= price
+        await ProductPurchaseRepository(session).create(
+            user_id=user.id,
+            product_code=product_code,
+            amount=price,
+            source=source,
+            payment_id=payment_id,
+        )
 
     def _instruction_delivery_text(self, balance_after_charge: Decimal) -> str:
         return (

@@ -90,6 +90,18 @@ class DeferredTariffPurchase(Base):
     cancelled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
+class ProductPurchase(Base):
+    __tablename__ = "product_purchases"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False, index=True)
+    product_code: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    amount: Mapped[Decimal] = mapped_column(Numeric(10, 2), nullable=False)
+    source: Mapped[str] = mapped_column(String(32), nullable=False)
+    payment_id: Mapped[int | None] = mapped_column(ForeignKey("payments.id"), nullable=True, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
 class PartnerReferralLink(Base):
     __tablename__ = "partner_referral_links"
 

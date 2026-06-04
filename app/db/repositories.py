@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 
-from sqlalchemy import Select, case, func, or_, select
+from sqlalchemy import Select, case, func, or_, select, union
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import (
@@ -14,6 +14,7 @@ from app.db.models import (
     PartnerReferralLink,
     Payment,
     PaymentStatus,
+    ProductPurchase,
     Referral,
     ReferralYearReward,
     SubscriptionCharge,
@@ -315,6 +316,44 @@ class DeferredTariffPurchaseRepository:
             .order_by(DeferredTariffPurchase.created_at.asc())
             .limit(limit)
         )
+        result = await self.session.execute(query)
+        return list(result.scalars().all())
+
+
+class ProductPurchaseRepository:
+    def __init__(self, session: AsyncSession) -> None:
+        self.session = session
+
+    async def create(
+        self,
+        *,
+        user_id: int,
+        product_code: str,
+        amount: Decimal,
+        source: str,
+        payment_id: int | None = None,
+    ) -> ProductPurchase:
+        purchase = ProductPurchase(
+            user_id=user_id,
+            product_code=product_code,
+            amount=amount,
+            source=source,
+            payment_id=payment_id,
+        )
+        self.session.add(purchase)
+        await self.session.flush()
+        return purchase
+
+    async def list_users_by_product_code(self, product_code: str) -> list[User]:
+        product_user_ids = select(ProductPurchase.user_id.label("user_id")).where(
+            ProductPurchase.product_code == product_code
+        )
+        legacy_deferred_user_ids = select(DeferredTariffPurchase.user_id.label("user_id")).where(
+            DeferredTariffPurchase.tariff_code == product_code,
+            DeferredTariffPurchase.applied_at.is_not(None),
+        )
+        user_ids = union(product_user_ids, legacy_deferred_user_ids).subquery()
+        query = select(User).join(user_ids, User.id == user_ids.c.user_id).order_by(User.id.asc())
         result = await self.session.execute(query)
         return list(result.scalars().all())
 

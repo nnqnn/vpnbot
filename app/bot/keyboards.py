@@ -45,8 +45,9 @@ def admin_menu() -> InlineKeyboardMarkup:
     kb.button(text="🔓 Разбанить", callback_data="admin:unban")
     kb.button(text="🎁 Выдать бонус", callback_data="admin:bonus")
     kb.button(text="📣 Массовая рассылка", callback_data="admin:broadcast")
+    kb.button(text="📣 Рассылка по обходу", callback_data="admin:broadcast_whitelist")
     kb.button(text="⬅️ В меню", callback_data="menu:back")
-    kb.adjust(1, 1, 1, 1, 1, 2, 2, 2, 1, 1)
+    kb.adjust(1, 1, 1, 1, 1, 2, 2, 2, 1, 1, 1)
     return kb.as_markup()
 
 

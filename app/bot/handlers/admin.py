@@ -19,11 +19,13 @@ from app.bot.states import AdminStates
 from app.config import Settings
 from app.db.repositories import (
     PartnerReferralLinkRepository,
+    ProductPurchaseRepository,
     UserRepository,
     UserSummaryStats,
     UserWithReferralStats,
 )
 from app.services.admin_service import AdminService
+from app.services.billing_service import WHITELIST_PRODUCT_CODE
 from app.utils.security import generate_referral_code
 from app.utils.time import human_remaining, localize, utc_now
 
@@ -48,6 +50,18 @@ async def _notify_user(bot, telegram_id: int, text: str) -> None:
         await bot.send_message(telegram_id, text)
     except Exception:  # noqa: BLE001
         return
+
+
+async def _broadcast_to_users(bot, users, text: str) -> tuple[int, int]:
+    sent = 0
+    failed = 0
+    for user in users:
+        try:
+            await bot.send_message(user.telegram_id, text, parse_mode=None)
+            sent += 1
+        except Exception:  # noqa: BLE001
+            failed += 1
+    return sent, failed
 
 
 def _username(user) -> str:
@@ -367,6 +381,19 @@ async def admin_broadcast(callback: CallbackQuery, state: FSMContext, settings: 
     await callback.answer()
 
 
+@admin_router.callback_query(F.data == "admin:broadcast_whitelist")
+async def admin_broadcast_whitelist(callback: CallbackQuery, state: FSMContext, settings: Settings) -> None:
+    if not await _is_admin(callback.from_user.id, settings):
+        await _deny_callback(callback)
+        return
+    await state.set_state(AdminStates.wait_broadcast_whitelist_text)
+    await callback.message.edit_text(
+        "Введите текст рассылки для покупателей обхода белых списков:",
+        reply_markup=admin_menu(),
+    )
+    await callback.answer()
+
+
 @admin_router.callback_query(F.data == "admin:ban")
 async def admin_ban(callback: CallbackQuery, state: FSMContext, settings: Settings) -> None:
     if not await _is_admin(callback.from_user.id, settings):
@@ -577,16 +604,40 @@ async def process_broadcast(
         return
 
     users = await UserRepository(session).list_all_users()
-    sent = 0
-    failed = 0
-    for user in users:
-        try:
-            await message.bot.send_message(user.telegram_id, text, parse_mode=None)
-            sent += 1
-        except Exception:  # noqa: BLE001
-            failed += 1
+    sent, failed = await _broadcast_to_users(message.bot, users, text)
 
     await message.answer(f"Рассылка завершена.\nДоставлено: {sent}\nОшибок: {failed}")
+    await state.clear()
+
+
+@admin_router.message(AdminStates.wait_broadcast_whitelist_text)
+async def process_whitelist_broadcast(
+    message: Message,
+    state: FSMContext,
+    session: AsyncSession,
+    settings: Settings,
+) -> None:
+    if not await _is_admin(message.from_user.id, settings):
+        await _deny_message(message)
+        return
+    text = (message.text or "").strip()
+    if not text:
+        await message.answer("Текст рассылки не должен быть пустым.")
+        return
+
+    users = await ProductPurchaseRepository(session).list_users_by_product_code(WHITELIST_PRODUCT_CODE)
+    if not users:
+        await message.answer("Покупателей обхода белых списков пока не найдено.")
+        await state.clear()
+        return
+
+    sent, failed = await _broadcast_to_users(message.bot, users, text)
+    await message.answer(
+        "Рассылка по обходу завершена.\n"
+        f"Найдено получателей: {len(users)}\n"
+        f"Доставлено: {sent}\n"
+        f"Ошибок: {failed}"
+    )
     await state.clear()
 
 
