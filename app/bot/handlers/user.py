@@ -107,13 +107,14 @@ def _build_vpn_access_text(
         "🔐 <b>Мой VPN</b>\n\n"
         f"Основной VPN: <b>{main_status}</b>\n"
         f"Обход белых списков: <b>{whitelist_status}</b>\n\n"
-        "Для подключения установите <a href=\"https://happ.su\">Happ</a> и нажмите ссылку ниже:\n"
-        f"<a href=\"{escape(https_link)}\">Добавить подписку в Happ</a>\n\n"
+        "Для подключения установите Happ: https://happ.su\n\n"
+        "Ссылка для добавления подписки:\n"
+        f"{escape(happ_open_url)}\n\n"
         "Если приложение не открылось автоматически, импортируйте ссылку вручную:\n"
-        f"<code>{escape(https_link)}</code>\n\n"
+        f"{escape(https_link)}\n\n"
         "Подписка обновляется автоматически. В ней отображаются только доступные вам узлы: "
         "основной VPN по активному сроку и обход белых списков после разовой покупки.\n\n"
-        "Доп. инструкция: https://t.me/kvpnpublic/2\n\n"
+        "Доп. инструкция: https://t.me/kvpn_public/2\n\n"
         f"Техническая поддержка, если необходима помощь: {settings.support_url}"
     )
 

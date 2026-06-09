@@ -98,11 +98,6 @@ print(secrets.token_urlsafe(32))
 PY
 )"
 fi
-if [[ -z "$PUBLIC_KEY" ]]; then
-  echo "SUBSCRIPTION_SERVER2_VLESS_PBK is required. Get it on server2 with: xray x25519 -i <server2_private_key>" >&2
-  exit 1
-fi
-
 ssh_base=(
   sshpass -p "$TGVPN_SERVER2_PASSWORD"
   ssh -o StrictHostKeyChecking=accept-new
@@ -163,6 +158,29 @@ xray_config_changed=false
 if [[ "\$before_hash" != "\$after_hash" ]]; then
   xray_config_changed=true
 fi
+effective_public_key="\$(python3 - <<'PY'
+from pathlib import Path
+import json
+import re
+import subprocess
+cfg = json.loads(Path("/usr/local/etc/xray/config.json").read_text(encoding="utf-8"))
+inbound = next(i for i in cfg.get("inbounds", []) if i.get("tag") == "upstream-in")
+private_key = inbound["streamSettings"]["realitySettings"].get("privateKey", "")
+out = subprocess.check_output(["xray", "x25519", "-i", private_key], text=True)
+match = re.search(r"Public key:\\s*(\\S+)", out)
+if match:
+    print(match.group(1))
+    raise SystemExit(0)
+for line in out.splitlines():
+    if "PublicKey" in line and ":" in line:
+        print(line.split(":", 1)[1].strip())
+        raise SystemExit(0)
+raise SystemExit("cannot derive REALITY public key")
+PY
+)"
+if [[ -n "\$public_key" && "\$public_key" != "\$effective_public_key" ]]; then
+  echo "WARNING: provided SUBSCRIPTION_SERVER2_VLESS_PBK does not match server2 REALITY private key; using derived public key." >&2
+fi
 
 cat > "\$server_dir/.env.subscription" <<ENV
 LOG_LEVEL=INFO
@@ -177,7 +195,7 @@ SUBSCRIPTION_PROFILE_TITLE=kVPN @kkVPNrobot
 SUBSCRIPTION_UPDATE_INTERVAL_HOURS=1
 SUBSCRIPTION_TRAFFIC_TOTAL_BYTES=0
 SUBSCRIPTION_ANNOUNCE_TEXT=kVPN: подписка обновляется автоматически.
-SUBSCRIPTION_ANNOUNCE_URL=https://t.me/kvpnpublic
+SUBSCRIPTION_ANNOUNCE_URL=https://t.me/kvpn_public
 VLESS_PUBLIC_HOST=\$direct_host
 VLESS_PUBLIC_PORT=\$direct_port
 VLESS_SECURITY=reality
@@ -185,12 +203,12 @@ VLESS_TYPE=tcp
 VLESS_SNI=yandex.ru
 VLESS_FLOW=xtls-rprx-vision
 VLESS_FP=chrome
-VLESS_PBK=\$public_key
+VLESS_PBK=\$effective_public_key
 VLESS_SID=a1b2c3d4e5f6a7b8
 VLESS_PATH=
 VLESS_HEADER_TYPE=
 VLESS_REMARK_PREFIX=kVPN
-SUPPORT_URL=https://t.me/kvpn_support
+SUPPORT_URL=https://t.me/kvpn_public
 WHITELIST_PROFILE_URL=https://vpn.nnqnn.tech/
 WHITELIST_SOURCE_URL=https://raw.githubusercontent.com/zieng2/wl/main/vless_universal.txt
 WHITELIST_MAX_NODES=300

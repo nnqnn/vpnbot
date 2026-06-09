@@ -150,7 +150,7 @@ def ensure_direct_vless_reality_inbound(
                 "tcpSettings": {},
                 "realitySettings": {
                     "show": False,
-                    "target": "yandex.ru:443",
+                    "dest": "www.yandex.ru:443",
                     "serverNames": sorted(set(server_names)),
                     "privateKey": private_key,
                     "shortIds": [short_id],
@@ -188,7 +188,7 @@ def ensure_direct_vless_reality_inbound(
         reality["privateKey"] = private_key
         changed = True
     if not reality.get("target") and not reality.get("dest"):
-        reality["target"] = "yandex.ru:443"
+        reality["dest"] = "www.yandex.ru:443"
         changed = True
 
     existing_names = reality.get("serverNames")

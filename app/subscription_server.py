@@ -44,7 +44,7 @@ class RuntimeConfig:
             update_interval_hours=int(_env("SUBSCRIPTION_UPDATE_INTERVAL_HOURS", "1")),
             traffic_total_bytes=int(_env("SUBSCRIPTION_TRAFFIC_TOTAL_BYTES", "0")),
             support_url=_env("SUPPORT_URL", "https://t.me/kvpn_support"),
-            announce_url=_env("SUBSCRIPTION_ANNOUNCE_URL", "https://t.me/kvpnpublic"),
+            announce_url=_env("SUBSCRIPTION_ANNOUNCE_URL", "https://t.me/kvpn_public"),
             announce_text=_env("SUBSCRIPTION_ANNOUNCE_TEXT", "kVPN: subscription auto-updates."),
             vless_public_host=_env("VLESS_PUBLIC_HOST", "s2.nnqnn.tech"),
             vless_public_port=int(_env("VLESS_PUBLIC_PORT", "9443")),

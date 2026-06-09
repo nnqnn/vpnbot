@@ -91,6 +91,7 @@ def test_subscription_response_includes_main_node_for_active_user() -> None:
     assert decoded.startswith("vless://00000000-0000-0000-0000-000000000001@s2.nnqnn.tech:9443")
     assert "pbk=PUBLIC_KEY" in decoded
     assert response.headers["cache-control"] == "no-store"
+    assert response.headers["support-url"] == "https://t.me/support"
     assert response.headers["subscription-userinfo"].endswith("expire=1781259930")
     assert json.loads(base64.b64decode(response.headers["routing"]).decode("utf-8"))["domainStrategy"] == "IPIfNonMatch"
 
@@ -178,6 +179,7 @@ def test_xray_json_response_uses_worker_profile_for_whitelist_only_user() -> Non
     assert len(configs) == 1
     config = configs[0]
     assert response.headers["content-type"] == "application/json; charset=utf-8"
+    assert response.headers["support-url"] == "https://t.me/support"
     assert response.headers["subscription-userinfo"].endswith("expire=0")
     assert [outbound["tag"] for outbound in config["outbounds"]] == ["auto-001", "direct", "block"]
     assert config["remarks"] == "kVPN @kkVPNrobot - Обход белых списков"
@@ -319,8 +321,10 @@ def test_bot_vpn_access_text_contains_happ_and_https_links() -> None:
         https_link="https://vpn.nnqnn.tech/sub/kVPN/abc",
     )
 
-    assert '<a href="https://vpn.nnqnn.tech/sub/kVPN/abc">Добавить подписку в Happ</a>' in text
-    assert "<code>https://vpn.nnqnn.tech/sub/kVPN/abc</code>" in text
+    assert "https://vpn.nnqnn.tech/add/kVPN/abc" in text
+    assert "https://vpn.nnqnn.tech/sub/kVPN/abc" in text
+    assert "<code>https://vpn.nnqnn.tech/sub/kVPN/abc</code>" not in text
+    assert '<a href="https://vpn.nnqnn.tech/sub/kVPN/abc">' not in text
     assert "Основной VPN: <b>активен до 10.06.2026 10:00</b>" in text
     assert "Обход белых списков: <b>доступен</b>" in text
 
