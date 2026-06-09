@@ -7,7 +7,7 @@ import time
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import unquote, urlsplit
+from urllib.parse import parse_qs, unquote, urlsplit
 
 import httpx
 from dotenv import load_dotenv
@@ -136,7 +136,9 @@ class SubscriptionHandler(BaseHTTPRequestHandler):
             self._send_text(HTTPStatus.OK, "ok")
             return
 
-        path = urlsplit(self.path).path
+        parsed_url = urlsplit(self.path)
+        path = parsed_url.path
+        query = parse_qs(parsed_url.query)
         parts = [unquote(part) for part in path.split("/") if part]
         if len(parts) == 3 and parts[0] == "add":
             self._send_happ_redirect(parts[1], parts[2])
@@ -157,6 +159,10 @@ class SubscriptionHandler(BaseHTTPRequestHandler):
         raw_user = snapshot.get("users", {}).get(token)
         if product != self.server.state.config.profile.product or not isinstance(raw_user, dict):
             self._send_text(HTTPStatus.NOT_FOUND, "not found")
+            return
+
+        if not _is_raw_subscription_request(query) and _is_browser_navigation(self.headers.get("accept", "")):
+            self._send_happ_redirect(product, token)
             return
 
         if self.server.state.config.response_format == "base64_links":
@@ -197,7 +203,7 @@ class SubscriptionHandler(BaseHTTPRequestHandler):
         self.wfile.write(text.encode("utf-8"))
 
     def _send_happ_redirect(self, product: str, token: str) -> None:
-        https_url = build_subscription_url(self.server.state.config.profile.public_base_url, product, token)
+        https_url = _raw_subscription_url(self.server.state.config.profile.public_base_url, product, token)
         happ_url = build_happ_link(https_url)
         html = (
             '<!doctype html><html><head><meta charset="utf-8">'
@@ -247,6 +253,20 @@ def main() -> None:
 
 def _env(key: str, default: str) -> str:
     return os.environ.get(key, default)
+
+
+def _raw_subscription_url(base_url: str, product: str, token: str) -> str:
+    return f"{build_subscription_url(base_url, product, token)}?format=raw"
+
+
+def _is_raw_subscription_request(query: dict[str, list[str]]) -> bool:
+    values = query.get("format", []) + query.get("raw", [])
+    return any(str(value).strip().lower() in {"1", "true", "yes", "raw", "json"} for value in values)
+
+
+def _is_browser_navigation(accept_header: str) -> bool:
+    accept = accept_header.lower()
+    return "text/html" in accept
 
 
 def _escape_html(value: str) -> str:

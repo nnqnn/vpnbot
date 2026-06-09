@@ -8,7 +8,12 @@ from types import SimpleNamespace
 from app.db.models import UserStatus
 from app.db.repositories import SubscriptionTokenRepository
 from app.bot.handlers.user import _build_raw_vless_access_text, _build_vpn_access_text
-from app.subscription_server import SubscriptionHandler
+from app.subscription_server import (
+    SubscriptionHandler,
+    _is_browser_navigation,
+    _is_raw_subscription_request,
+    _raw_subscription_url,
+)
 from app.services.subscription_builder import (
     SubscriptionProfile,
     build_happ_link,
@@ -283,6 +288,17 @@ def test_subscription_links() -> None:
     assert build_happ_redirect_url("https://vpn.nnqnn.tech/", "kVPN", "abc") == (
         "https://vpn.nnqnn.tech/add/kVPN/abc"
     )
+    assert _raw_subscription_url("https://vpn.nnqnn.tech/", "kVPN", "abc") == (
+        "https://vpn.nnqnn.tech/sub/kVPN/abc?format=raw"
+    )
+
+
+def test_subscription_server_browser_redirect_detection() -> None:
+    assert _is_browser_navigation("text/html,application/xhtml+xml")
+    assert not _is_browser_navigation("application/json,*/*")
+    assert _is_raw_subscription_request({"format": ["raw"]})
+    assert _is_raw_subscription_request({"raw": ["1"]})
+    assert not _is_raw_subscription_request({})
 
 
 def test_bot_vpn_access_text_contains_happ_and_https_links() -> None:
@@ -297,7 +313,8 @@ def test_bot_vpn_access_text_contains_happ_and_https_links() -> None:
         https_link="https://vpn.nnqnn.tech/sub/kVPN/abc",
     )
 
-    assert "https://vpn.nnqnn.tech/sub/kVPN/abc" in text
+    assert '<a href="https://vpn.nnqnn.tech/sub/kVPN/abc">Добавить подписку в Happ</a>' in text
+    assert "<code>https://vpn.nnqnn.tech/sub/kVPN/abc</code>" in text
     assert "Основной VPN: <b>активен до 10.06.2026 10:00</b>" in text
     assert "Обход белых списков: <b>доступен</b>" in text
 
