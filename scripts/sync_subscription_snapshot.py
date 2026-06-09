@@ -2,6 +2,13 @@
 from __future__ import annotations
 
 import asyncio
+import sys
+from pathlib import Path
+
+# Allow direct execution: `python3 scripts/sync_subscription_snapshot.py`
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 
 from app.config import get_settings
 from app.db.session import build_engine, build_session_maker, init_db
