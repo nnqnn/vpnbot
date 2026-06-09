@@ -105,7 +105,7 @@ def build_subscription_response(
         "content-type": "text/plain; charset=utf-8",
         "cache-control": "no-store",
         "content-disposition": f"attachment; filename={profile.product}_{user.telegram_id}",
-        "support-url": profile.support_url,
+        "support-url": "https://t.me/kvpnpublic",
         "profile-title": f"base64:{b64_text(profile.profile_title)}",
         "profile-update-interval": str(profile.update_interval_hours),
         "announce": f"base64:{b64_text(_build_announce(profile.announce_text, user))}",
@@ -133,13 +133,13 @@ def build_xray_json_subscription_response(
         return None
 
     user = snapshot_user_from_payload(raw_user)
-    config = build_xray_json_config(user, profile, whitelist_profile=whitelist_profile)
+    configs = build_xray_json_profiles(user, profile, whitelist_profile=whitelist_profile)
     https_url = build_subscription_url(profile.public_base_url, profile.product, token)
     headers = {
         "content-type": "application/json; charset=utf-8",
         "cache-control": "no-store",
         "content-disposition": f"attachment; filename={profile.product}_{user.telegram_id}.json",
-        "support-url": profile.support_url,
+        "support-url": "https://t.me/kvpn_support",
         "profile-title": f"base64:{b64_text(profile.profile_title)}",
         "profile-update-interval": str(profile.update_interval_hours),
         "subscription-auto-update-enable": "1",
@@ -148,8 +148,22 @@ def build_xray_json_subscription_response(
         "announce-url": profile.announce_url,
         "profile-web-page-url": https_url,
     }
-    body = json.dumps(config, ensure_ascii=False, separators=(",", ":"))
-    return SubscriptionResponse(body=body, headers=headers, nodes=_config_outbound_tags(config))
+    body = json.dumps(configs, ensure_ascii=False, separators=(",", ":"))
+    return SubscriptionResponse(body=body, headers=headers, nodes=_profile_remarks(configs))
+
+
+def build_xray_json_profiles(
+    user: SnapshotUser,
+    profile: SubscriptionProfile,
+    *,
+    whitelist_profile: dict[str, Any] | None = None,
+) -> list[dict[str, Any]]:
+    configs: list[dict[str, Any]] = []
+    if user.main_vpn_active:
+        configs.append(_build_single_main_config(user, profile))
+    if user.whitelist_enabled and isinstance(whitelist_profile, dict):
+        configs.append(_normalize_whitelist_profile(whitelist_profile, profile))
+    return configs
 
 
 def build_xray_json_config(
@@ -158,15 +172,10 @@ def build_xray_json_config(
     *,
     whitelist_profile: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    if user.whitelist_enabled and isinstance(whitelist_profile, dict):
-        config = _normalize_whitelist_profile(whitelist_profile, profile)
-        if user.main_vpn_active:
-            _merge_main_outbound_into_balancer(config, build_main_xray_outbound(user, profile, tag="auto-main"))
-        return config
-
     if user.main_vpn_active:
         return _build_single_main_config(user, profile)
-
+    if user.whitelist_enabled and isinstance(whitelist_profile, dict):
+        return _normalize_whitelist_profile(whitelist_profile, profile)
     return _build_blocked_config(profile)
 
 
@@ -287,6 +296,7 @@ def _build_base_client_config(profile: SubscriptionProfile) -> dict[str, Any]:
 
 def _build_single_main_config(user: SnapshotUser, profile: SubscriptionProfile) -> dict[str, Any]:
     config = _build_base_client_config(profile)
+    config["remarks"] = f"{profile.profile_title} - Основной VPN"
     config["outbounds"] = [
         build_main_xray_outbound(user, profile, tag="proxy"),
         {"tag": "direct", "protocol": "freedom"},
@@ -324,7 +334,7 @@ def _build_blocked_config(profile: SubscriptionProfile) -> dict[str, Any]:
 
 def _normalize_whitelist_profile(whitelist_profile: dict[str, Any], profile: SubscriptionProfile) -> dict[str, Any]:
     config = deepcopy(whitelist_profile)
-    config.setdefault("remarks", profile.profile_title)
+    config["remarks"] = f"{profile.profile_title} - Обход белых списков"
     config.setdefault("log", {"loglevel": "warning"})
     config.setdefault("outbounds", [])
     if not isinstance(config["outbounds"], list):
@@ -400,6 +410,15 @@ def _config_outbound_tags(config: dict[str, Any]) -> list[str]:
         if isinstance(outbound, dict) and isinstance(outbound.get("tag"), str):
             tags.append(outbound["tag"])
     return tags
+
+
+def _profile_remarks(configs: list[dict[str, Any]]) -> list[str]:
+    remarks: list[str] = []
+    for config in configs:
+        value = config.get("remarks")
+        if isinstance(value, str):
+            remarks.append(value)
+    return remarks
 
 
 def filter_whitelist_vless_nodes(source_text: str, *, max_nodes: int) -> list[str]:

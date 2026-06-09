@@ -9,6 +9,8 @@ SERVER_USER="${SERVER_USER:-root}"
 SERVER_DIR="${SERVER_DIR:-/home/tgvpn}"
 SERVER_REMOTE="${SERVER_REMOTE:-origin}"
 SERVICE="${SERVICE:-tgvpn-bot.service}"
+DEPLOY_SERVER2_SUBSCRIPTION="${DEPLOY_SERVER2_SUBSCRIPTION:-true}"
+SUBSCRIPTION_RESTART_XRAY="${SUBSCRIPTION_RESTART_XRAY:-false}"
 AUTO_COMMIT_MESSAGE="${AUTO_COMMIT_MESSAGE:-Auto deploy $(date +'%Y-%m-%d %H:%M:%S')}"
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -94,13 +96,20 @@ fi
 
 log "Running local checks"
 ".venv/bin/python" -m pytest -q
-".venv/bin/python" -m compileall -q app scripts
+".venv/bin/python" -m compileall -q app scripts tests
 
 ensure_server_password
 auto_commit_if_needed
 
 log "Pushing ${BRANCH} to ${REMOTE}"
 git push "$REMOTE" "$BRANCH"
+
+if [[ "$DEPLOY_SERVER2_SUBSCRIPTION" == "true" ]]; then
+  log "Deploying server2 subscription service"
+  SUBSCRIPTION_RESTART_XRAY="$SUBSCRIPTION_RESTART_XRAY" ./scripts/deploy_server2_subscription.sh
+else
+  log "Skipping server2 subscription deploy"
+fi
 
 log "Deploying on ${SERVER_USER}@${SERVER_HOST}:${SERVER_DIR}"
 SSHPASS="$TGVPN_SERVER_PASSWORD" sshpass -e ssh \
@@ -179,7 +188,7 @@ rollback() {
   fi
   if [[ -x ".venv/bin/python" ]]; then
     ".venv/bin/python" -m pip install -r requirements.txt || true
-    ".venv/bin/python" -m compileall -q app scripts || true
+    ".venv/bin/python" -m compileall -q app scripts tests || true
   fi
   systemctl restart "$service" || true
   sleep 3
@@ -201,7 +210,7 @@ if [[ ! -x ".venv/bin/python" ]]; then
 fi
 ".venv/bin/python" -m pip install --upgrade pip
 ".venv/bin/python" -m pip install -r requirements.txt
-".venv/bin/python" -m compileall -q app scripts
+".venv/bin/python" -m compileall -q app scripts tests
 
 log "Restarting ${service}"
 if ! systemctl restart "$service"; then

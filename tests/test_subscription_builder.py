@@ -36,7 +36,7 @@ def _profile() -> SubscriptionProfile:
         vless_public_port=9443,
         vless_security="reality",
         vless_type="tcp",
-        vless_sni="www.cloudflare.com",
+        vless_sni="yandex.ru",
         vless_flow="xtls-rprx-vision",
         vless_fp="chrome",
         vless_pbk="PUBLIC_KEY",
@@ -162,14 +162,18 @@ def test_xray_json_response_uses_worker_profile_for_whitelist_only_user() -> Non
     )
 
     assert response is not None
-    config = json.loads(response.body)
+    configs = json.loads(response.body)
+    assert isinstance(configs, list)
+    assert len(configs) == 1
+    config = configs[0]
     assert response.headers["content-type"] == "application/json; charset=utf-8"
     assert response.headers["subscription-userinfo"].endswith("expire=0")
     assert [outbound["tag"] for outbound in config["outbounds"]] == ["auto-001", "direct", "block"]
+    assert config["remarks"] == "kVPN @kkVPNrobot - Обход белых списков"
     assert "vless://wl-1" not in response.body
 
 
-def test_xray_json_response_merges_main_outbound_into_worker_balancer_for_full_access() -> None:
+def test_xray_json_response_separates_main_and_whitelist_profiles_for_full_access() -> None:
     snapshot = {
         "users": {
             "tok": {
@@ -202,10 +206,17 @@ def test_xray_json_response_merges_main_outbound_into_worker_balancer_for_full_a
     )
 
     assert response is not None
-    config = json.loads(response.body)
-    assert config["outbounds"][0]["tag"] == "auto-main"
-    assert config["outbounds"][0]["settings"]["vnext"][0]["address"] == "s2.nnqnn.tech"
-    assert config["routing"]["balancers"][0]["selector"] == ["auto-"]
+    configs = json.loads(response.body)
+    assert isinstance(configs, list)
+    assert len(configs) == 2
+    main_config, whitelist_config = configs
+    assert main_config["remarks"] == "kVPN @kkVPNrobot - Основной VPN"
+    assert main_config["outbounds"][0]["tag"] == "proxy"
+    assert main_config["outbounds"][0]["settings"]["vnext"][0]["address"] == "s2.nnqnn.tech"
+    assert main_config["outbounds"][0]["streamSettings"]["realitySettings"]["serverName"] == "yandex.ru"
+    assert whitelist_config["remarks"] == "kVPN @kkVPNrobot - Обход белых списков"
+    assert whitelist_config["outbounds"][0]["tag"] == "auto-001"
+    assert whitelist_config["routing"]["balancers"][0]["selector"] == ["auto-"]
     assert response.headers["subscription-userinfo"].endswith("expire=1781259930")
 
 
@@ -231,9 +242,37 @@ def test_xray_json_response_builds_main_only_profile_without_whitelist_fetch() -
     )
 
     assert response is not None
-    config = json.loads(response.body)
+    configs = json.loads(response.body)
+    assert isinstance(configs, list)
+    assert len(configs) == 1
+    config = configs[0]
     assert [outbound["tag"] for outbound in config["outbounds"]] == ["proxy", "direct", "block"]
     assert config["routing"]["rules"][-1] == {"network": "tcp,udp", "outboundTag": "proxy"}
+
+
+def test_xray_json_response_returns_empty_profile_list_without_entitlements() -> None:
+    snapshot = {
+        "users": {
+            "tok": {
+                "telegram_id": 123,
+                "uuid": "00000000-0000-0000-0000-000000000001",
+                "main_vpn_active": False,
+                "whitelist_enabled": False,
+                "expire": 0,
+            }
+        }
+    }
+
+    response = build_xray_json_subscription_response(
+        snapshot=snapshot,
+        product="kVPN",
+        token="tok",
+        profile=_profile(),
+        whitelist_profile=None,
+    )
+
+    assert response is not None
+    assert json.loads(response.body) == []
 
 
 def test_subscription_links() -> None:
@@ -258,9 +297,7 @@ def test_bot_vpn_access_text_contains_happ_and_https_links() -> None:
         https_link="https://vpn.nnqnn.tech/sub/kVPN/abc",
     )
 
-    assert "https://vpn.nnqnn.tech/add/kVPN/abc" in text
-    assert "happ://add/https://vpn.nnqnn.tech/sub/kVPN/abc" in text
-    assert "<code>https://vpn.nnqnn.tech/sub/kVPN/abc</code>" in text
+    assert "https://vpn.nnqnn.tech/sub/kVPN/abc" in text
     assert "Основной VPN: <b>активен до 10.06.2026 10:00</b>" in text
     assert "Обход белых списков: <b>доступен</b>" in text
 

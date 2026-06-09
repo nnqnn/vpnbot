@@ -14,6 +14,7 @@ SUBSCRIPTION_PORT="${SUBSCRIPTION_LISTEN_PORT:-8088}"
 LETSENCRYPT_EMAIL="${LETSENCRYPT_EMAIL:-}"
 ORIGIN_SECRET="${SUBSCRIPTION_ORIGIN_SECRET:-}"
 REQUIRE_ORIGIN_SECRET="${SUBSCRIPTION_REQUIRE_ORIGIN_SECRET:-false}"
+RESTART_XRAY="${SUBSCRIPTION_RESTART_XRAY:-false}"
 PUBLIC_KEY="${SUBSCRIPTION_SERVER2_VLESS_PBK:-}"
 ARCHIVE="/tmp/tgvpn-server2-subscription.tar.gz"
 
@@ -63,6 +64,7 @@ require_cmd tar
 load_optional_env TGVPN_SERVER2_PASSWORD
 load_optional_env SUBSCRIPTION_ORIGIN_SECRET
 load_optional_env SUBSCRIPTION_REQUIRE_ORIGIN_SECRET
+load_optional_env SUBSCRIPTION_RESTART_XRAY
 load_optional_env SUBSCRIPTION_SERVER2_VLESS_PBK
 load_optional_env SUBSCRIPTION_SERVER2_HOST
 load_optional_env SUBSCRIPTION_SERVER2_USER
@@ -79,6 +81,7 @@ DIRECT_PORT="${SUBSCRIPTION_DIRECT_PORT:-$DIRECT_PORT}"
 LETSENCRYPT_EMAIL="${LETSENCRYPT_EMAIL:-$LETSENCRYPT_EMAIL}"
 ORIGIN_SECRET="${SUBSCRIPTION_ORIGIN_SECRET:-$ORIGIN_SECRET}"
 REQUIRE_ORIGIN_SECRET="${SUBSCRIPTION_REQUIRE_ORIGIN_SECRET:-$REQUIRE_ORIGIN_SECRET}"
+RESTART_XRAY="${SUBSCRIPTION_RESTART_XRAY:-$RESTART_XRAY}"
 PUBLIC_KEY="${SUBSCRIPTION_SERVER2_VLESS_PBK:-$PUBLIC_KEY}"
 
 if [[ -z "${TGVPN_SERVER2_PASSWORD:-}" ]]; then
@@ -158,7 +161,7 @@ VLESS_PUBLIC_HOST=\$direct_host
 VLESS_PUBLIC_PORT=\$direct_port
 VLESS_SECURITY=reality
 VLESS_TYPE=tcp
-VLESS_SNI=www.cloudflare.com
+VLESS_SNI=yandex.ru
 VLESS_FLOW=xtls-rprx-vision
 VLESS_FP=chrome
 VLESS_PBK=\$public_key
@@ -201,10 +204,13 @@ else
 fi
 REMOTE_SCRIPT
 
-log "Restarting and checking Xray on server2"
-"${ssh_base[@]}" "nohup sh -c 'systemctl restart xray' >/tmp/tgvpn-xray-restart.log 2>&1 &" || true
-sleep 4
-"${ssh_base[@]}" "systemctl is-active --quiet xray && xray api inboundusercount --server=127.0.0.1:10085 --timeout=5 -tag=upstream-in --json >/dev/null"
+if [[ "$RESTART_XRAY" == "true" ]]; then
+  log "Restarting and checking Xray on server2"
+  "${ssh_base[@]}" "systemctl restart xray && sleep 3 && systemctl is-active --quiet xray && xray api inboundusercount --server=127.0.0.1:10085 --timeout=5 -tag=upstream-in --json >/dev/null"
+else
+  log "Checking Xray on server2 without restart"
+  "${ssh_base[@]}" "systemctl is-active --quiet xray && xray api inboundusercount --server=127.0.0.1:10085 --timeout=5 -tag=upstream-in --json >/dev/null"
+fi
 
 log "Checking DNS for ${DIRECT_HOST}"
 dns_ips="$(dig +short "$DIRECT_HOST" A 2>/dev/null | tr '\n' ' ' || true)"
@@ -224,6 +230,7 @@ letsencrypt_email="$LETSENCRYPT_EMAIL"
 apt-get update >/dev/null
 DEBIAN_FRONTEND=noninteractive apt-get install -y nginx certbot python3-certbot-nginx >/dev/null
 mkdir -p /var/www/html
+rm -f /etc/nginx/sites-enabled/tgvpn-subscription.conf
 
 cat > /etc/nginx/sites-available/tgvpn-subscription-bootstrap.conf <<NGINX
 server {
