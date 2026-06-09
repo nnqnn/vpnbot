@@ -470,6 +470,14 @@ Worker для `vpn.nnqnn.tech` лежит в `deploy/cloudflare/vpn-nnqnn-worker
 - `/sub/kVPN/<token>`: прокси к server #2 origin;
 - `/add/kVPN/<token>`: HTTPS-страница для Telegram, которая открывает `happ://add/https://...`.
 
+После DNS и Worker запустите cutover:
+
+```bash
+TGVPN_SERVER_PASSWORD="SERVER1_ROOT_PASSWORD" scripts/enable_subscription_cutover.sh
+```
+
+Скрипт проверит `s2.nnqnn.tech`, сделает свежий snapshot, проверит публичный `https://vpn.nnqnn.tech/sub/...` реальным токеном и только потом включит `SUBSCRIPTION_LINKS_ENABLED=true` на server #1.
+
 ## Безопасность
 
 - Все admin-действия ограничены `SUPER_ADMIN_ID`
