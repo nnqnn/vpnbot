@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 from zoneinfo import ZoneInfo
 
@@ -106,15 +107,39 @@ class SchedulerService:
         await self.billing_service.reconcile_states()
 
     async def _xray_sync_job(self) -> None:
-        await self.billing_service.sync_xray_runtime_state()
+        try:
+            await self._run_with_timeout(
+                self.billing_service.sync_xray_runtime_state(),
+                "xray runtime sync job",
+                self.settings.xray_remote_command_timeout_seconds,
+            )
+        except Exception:
+            logger.exception("Xray runtime sync job failed")
 
     async def _subscription_snapshot_job(self) -> None:
         if self.subscription_snapshot_service is None:
             return
-        await self.subscription_snapshot_service.sync_once()
+        try:
+            await self._run_with_timeout(
+                self.subscription_snapshot_service.sync_once(),
+                "subscription snapshot job",
+                self.settings.xray_remote_command_timeout_seconds,
+            )
+        except Exception:
+            logger.exception("Subscription snapshot job failed")
 
     async def _notify_job(self) -> None:
         await self.billing_service.send_expiration_warnings(self.bot)
 
     async def _device_limit_job(self) -> None:
         await self.device_limit_service.enforce(self.bot)
+
+    @staticmethod
+    async def _run_with_timeout(awaitable, name: str, timeout_seconds: int):
+        if timeout_seconds <= 0:
+            return await awaitable
+        try:
+            return await asyncio.wait_for(awaitable, timeout=timeout_seconds)
+        except TimeoutError:
+            logger.error("%s timed out after %ss", name, timeout_seconds)
+            return None

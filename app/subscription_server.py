@@ -133,7 +133,7 @@ class SubscriptionHandler(BaseHTTPRequestHandler):
 
     def do_GET(self) -> None:  # noqa: N802
         if self.path == "/healthz":
-            self._send_text(HTTPStatus.OK, "ok")
+            self._send_health()
             return
 
         parsed_url = urlsplit(self.path)
@@ -201,6 +201,21 @@ class SubscriptionHandler(BaseHTTPRequestHandler):
         self.send_header("cache-control", "no-store")
         self.end_headers()
         self.wfile.write(text.encode("utf-8"))
+
+    def _send_health(self) -> None:
+        snapshot = self.server.state.load_snapshot()
+        users = snapshot.get("users", {})
+        payload = {
+            "ok": True,
+            "snapshot_version": snapshot.get("version"),
+            "generated_at": snapshot.get("generated_at"),
+            "users": len(users) if isinstance(users, dict) else 0,
+        }
+        self.send_response(HTTPStatus.OK)
+        self.send_header("content-type", "application/json; charset=utf-8")
+        self.send_header("cache-control", "no-store")
+        self.end_headers()
+        self.wfile.write(json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8"))
 
     def _send_happ_redirect(self, product: str, token: str) -> None:
         https_url = _raw_subscription_url(self.server.state.config.profile.public_base_url, product, token)

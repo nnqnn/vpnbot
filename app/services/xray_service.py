@@ -126,12 +126,14 @@ class XrayService:
         to_remove = [self.user_email(tg_id) for tg_id in sorted(managed_ids - expected_ids)]
 
         async with self._lock:
+            if self._is_ssh_api_mode():
+                managed_emails = [self.user_email(tg_id) for tg_id in sorted(managed_ids)]
+                await self._sync_enabled_users_remote_helper_unlocked(expected_by_email, managed_emails)
+                return
             for email in to_remove:
                 await self._remove_user_via_api_unlocked(email=email)
             for email, user_uuid in expected_by_email.items():
                 await self._add_user_via_api_unlocked(email=email, user_uuid=user_uuid)
-            if self._is_ssh_api_mode():
-                await self._persist_remote_config_sync_unlocked(expected_by_email)
 
     async def get_user_traffic(self, telegram_id: int) -> tuple[int, int] | None:
         if not self.settings.xray_api_enabled:
@@ -261,7 +263,11 @@ class XrayService:
         if code == 0 and self._adu_added_users_count(stdout) > 0:
             return
         if self._looks_like_user_exists_error(stdout, stderr):
-            # Replace stale runtime user to enforce DB UUID/flow after crashes or manual drift.
+            runtime_code, runtime_stdout, runtime_stderr = await self._get_user_via_api_unlocked(email=email)
+            if runtime_code == 0 and self._runtime_user_matches(runtime_stdout, email=email, user_uuid=user_uuid):
+                logger.debug("Xray API user already present with expected UUID: %s", email)
+                return
+
             logger.warning("Xray API user exists, replacing runtime user: %s", email)
             await self._remove_user_via_api_unlocked(email=email)
             retry_code, retry_stdout, retry_stderr = await self._run_adu_with_payload(payload)
@@ -280,6 +286,43 @@ class XrayService:
             stdout.strip(),
         )
         raise RuntimeError("Failed to add user via Xray API")
+
+    async def _sync_enabled_users_remote_helper_unlocked(
+        self,
+        expected_by_email: dict[str, str],
+        managed_emails: list[str],
+    ) -> None:
+        payload = {
+            "xray_bin_path": self.settings.xray_bin_path,
+            "xray_api_server": self.settings.xray_api_server,
+            "xray_api_timeout_seconds": self.settings.xray_api_timeout_seconds,
+            "command_timeout_seconds": self.settings.xray_remote_command_timeout_seconds,
+            "xray_config_path": str(self.settings.xray_config_path),
+            "xray_inbound_tag": self.settings.xray_inbound_tag,
+            "vless_flow": self.settings.vless_flow,
+            "expected": expected_by_email,
+            "managed_emails": managed_emails,
+        }
+        local_payload = await asyncio.to_thread(self._write_temp_json, payload)
+        remote_payload = f"/tmp/tgvpn-reconcile-{os.getpid()}-{Path(local_payload).name}"
+        try:
+            upload_code, upload_stdout, upload_stderr = await self._scp_to_remote(local_payload, remote_payload)
+            if upload_code != 0:
+                raise RuntimeError(
+                    f"Failed to upload Xray reconcile payload: {upload_stderr.strip() or upload_stdout.strip()}"
+                )
+
+            command = (
+                f"python3 {shlex.quote(self.settings.xray_remote_helper_path)} "
+                f"--payload {shlex.quote(remote_payload)}"
+            )
+            code, stdout, stderr = await self._run_remote_shell_command(command)
+            if code != 0:
+                raise RuntimeError(f"Remote Xray reconcile failed: {stderr.strip() or stdout.strip()}")
+            logger.info("Remote Xray reconcile summary: %s", stdout.strip())
+        finally:
+            await self._run_remote_shell_command(f"rm -f {shlex.quote(remote_payload)}")
+            await asyncio.to_thread(self._safe_unlink, local_payload)
 
     async def _run_adu_with_payload(self, payload: dict[str, Any]) -> tuple[int, str, str]:
         if self._is_ssh_api_mode():
@@ -315,6 +358,12 @@ class XrayService:
             return
         logger.error("Xray API remove user failed (%s): %s", code, stderr.strip() or stdout.strip())
         raise RuntimeError("Failed to remove user via Xray API")
+
+    async def _get_user_via_api_unlocked(self, email: str) -> tuple[int, str, str]:
+        return await self._run_args_command(
+            self._api_command("inbounduser")
+            + [f"-tag={self.settings.xray_inbound_tag}", f"-email={email}", "--json"]
+        )
 
     def _build_client(self, user_uuid: str, email: str) -> dict[str, Any]:
         data: dict[str, Any] = {"id": str(user_uuid), "email": email}
@@ -476,6 +525,17 @@ class XrayService:
         text = f"{stdout}\n{stderr}".lower()
         return "not found" in text
 
+    def _runtime_user_matches(self, stdout: str, *, email: str, user_uuid: str) -> bool:
+        try:
+            normalized = json.dumps(json.loads(stdout), ensure_ascii=False, separators=(",", ":"))
+        except json.JSONDecodeError:
+            normalized = stdout
+        if email not in normalized or str(user_uuid) not in normalized:
+            return False
+        if self.settings.vless_flow and '"flow"' in normalized and self.settings.vless_flow not in normalized:
+            return False
+        return True
+
     @staticmethod
     def _adu_added_users_count(stdout: str) -> int:
         match = re.search(r"Added\s+(\d+)\s+user\(s\)\s+in total", stdout)
@@ -529,7 +589,20 @@ class XrayService:
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
-        stdout, stderr = await process.communicate()
+        timeout = self.settings.xray_remote_command_timeout_seconds
+        try:
+            if timeout > 0:
+                stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=timeout)
+            else:
+                stdout, stderr = await process.communicate()
+        except TimeoutError:
+            process.kill()
+            stdout, stderr = await process.communicate()
+            return (
+                124,
+                stdout.decode("utf-8", errors="ignore"),
+                (stderr.decode("utf-8", errors="ignore") + f"\ncommand timed out after {timeout}s").strip(),
+            )
         return (
             process.returncode,
             stdout.decode("utf-8", errors="ignore"),
@@ -553,7 +626,11 @@ class XrayService:
             await asyncio.to_thread(self._safe_unlink, config_file)
 
     async def _run_remote_shell_command(self, command: str) -> tuple[int, str, str]:
-        return await self._run_process_args(self._ssh_command(command), env=self._ssh_env())
+        return await self._run_process_args(
+            self._ssh_command(command),
+            env=self._ssh_env(),
+            timeout=self.settings.xray_remote_command_timeout_seconds,
+        )
 
     async def _scp_to_remote(self, local_path: str, remote_path: str) -> tuple[int, str, str]:
         args = self._sshpass_prefix()
@@ -574,7 +651,11 @@ class XrayService:
                 f"{self.settings.xray_remote_user}@{self.settings.xray_remote_host}:{remote_path}",
             ]
         )
-        return await self._run_process_args(args, env=self._ssh_env())
+        return await self._run_process_args(
+            args,
+            env=self._ssh_env(),
+            timeout=self.settings.xray_remote_command_timeout_seconds,
+        )
 
     def _ssh_command(self, command: str) -> list[str]:
         if not self.settings.xray_remote_host:
@@ -605,14 +686,31 @@ class XrayService:
         return env
 
     @staticmethod
-    async def _run_process_args(args: list[str], *, env: dict[str, str] | None = None) -> tuple[int, str, str]:
+    async def _run_process_args(
+        args: list[str],
+        *,
+        env: dict[str, str] | None = None,
+        timeout: int | None = None,
+    ) -> tuple[int, str, str]:
         process = await asyncio.create_subprocess_exec(
             *args,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
             env=env,
         )
-        stdout, stderr = await process.communicate()
+        try:
+            if timeout and timeout > 0:
+                stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=timeout)
+            else:
+                stdout, stderr = await process.communicate()
+        except TimeoutError:
+            process.kill()
+            stdout, stderr = await process.communicate()
+            return (
+                124,
+                stdout.decode("utf-8", errors="ignore"),
+                (stderr.decode("utf-8", errors="ignore") + f"\ncommand timed out after {timeout}s").strip(),
+            )
         return (
             process.returncode,
             stdout.decode("utf-8", errors="ignore"),

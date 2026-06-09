@@ -16,6 +16,7 @@ ORIGIN_SECRET="${SUBSCRIPTION_ORIGIN_SECRET:-}"
 REQUIRE_ORIGIN_SECRET="${SUBSCRIPTION_REQUIRE_ORIGIN_SECRET:-false}"
 RESTART_XRAY="${SUBSCRIPTION_RESTART_XRAY:-false}"
 PUBLIC_KEY="${SUBSCRIPTION_SERVER2_VLESS_PBK:-}"
+REALITY_PRIVATE_KEY="${SUBSCRIPTION_SERVER2_REALITY_PRIVATE_KEY:-}"
 ARCHIVE="/tmp/tgvpn-server2-subscription.tar.gz"
 
 log() {
@@ -66,6 +67,7 @@ load_optional_env SUBSCRIPTION_ORIGIN_SECRET
 load_optional_env SUBSCRIPTION_REQUIRE_ORIGIN_SECRET
 load_optional_env SUBSCRIPTION_RESTART_XRAY
 load_optional_env SUBSCRIPTION_SERVER2_VLESS_PBK
+load_optional_env SUBSCRIPTION_SERVER2_REALITY_PRIVATE_KEY
 load_optional_env SUBSCRIPTION_SERVER2_HOST
 load_optional_env SUBSCRIPTION_SERVER2_USER
 load_optional_env SUBSCRIPTION_SERVER2_DIR
@@ -83,6 +85,7 @@ ORIGIN_SECRET="${SUBSCRIPTION_ORIGIN_SECRET:-$ORIGIN_SECRET}"
 REQUIRE_ORIGIN_SECRET="${SUBSCRIPTION_REQUIRE_ORIGIN_SECRET:-$REQUIRE_ORIGIN_SECRET}"
 RESTART_XRAY="${SUBSCRIPTION_RESTART_XRAY:-$RESTART_XRAY}"
 PUBLIC_KEY="${SUBSCRIPTION_SERVER2_VLESS_PBK:-$PUBLIC_KEY}"
+REALITY_PRIVATE_KEY="${SUBSCRIPTION_SERVER2_REALITY_PRIVATE_KEY:-$REALITY_PRIVATE_KEY}"
 
 if [[ -z "${TGVPN_SERVER2_PASSWORD:-}" ]]; then
   echo "TGVPN_SERVER2_PASSWORD is required in environment or .env" >&2
@@ -133,6 +136,9 @@ direct_port="$DIRECT_PORT"
 subscription_port="$SUBSCRIPTION_PORT"
 origin_secret="$ORIGIN_SECRET"
 public_key="$PUBLIC_KEY"
+reality_private_key="$REALITY_PRIVATE_KEY"
+restart_xray="$RESTART_XRAY"
+xray_config=/usr/local/etc/xray/config.json
 
 cd "\$server_dir"
 tar -xzf /tmp/tgvpn-server2-subscription.tar.gz
@@ -140,8 +146,23 @@ tar -xzf /tmp/tgvpn-server2-subscription.tar.gz
 apt-get update >/dev/null
 DEBIAN_FRONTEND=noninteractive apt-get install -y python3-httpx python3-dotenv curl >/dev/null
 
-python3 "\$server_dir/scripts/configure_server2_xray_api.py"
-xray run -test -c /usr/local/etc/xray/config.json
+before_hash="\$(sha256sum "\$xray_config" | awk '{print \$1}')"
+python3 "\$server_dir/scripts/configure_server2_xray_api.py" \
+  --config "\$xray_config" \
+  --api-port 10085 \
+  --inbound-tag upstream-in \
+  --direct-port "\$direct_port" \
+  --server-name www.cloudflare.com \
+  --server-name yandex.ru \
+  --short-id a1b2c3d4e5f6a7b8 \
+  --flow xtls-rprx-vision \
+  --private-key "\$reality_private_key"
+xray run -test -c "\$xray_config"
+after_hash="\$(sha256sum "\$xray_config" | awk '{print \$1}')"
+xray_config_changed=false
+if [[ "\$before_hash" != "\$after_hash" ]]; then
+  xray_config_changed=true
+fi
 
 cat > "\$server_dir/.env.subscription" <<ENV
 LOG_LEVEL=INFO
@@ -196,6 +217,17 @@ sleep 2
 systemctl is-active --quiet tgvpn-subscription.service
 curl -fsS "http://127.0.0.1:\$subscription_port/healthz" >/dev/null
 
+if [[ "\$xray_config_changed" == "true" || "\$restart_xray" == "true" ]]; then
+  echo "restarting xray after config change or explicit request"
+  systemctl restart xray
+  sleep 3
+else
+  echo "xray config unchanged; checking without restart"
+fi
+systemctl is-active --quiet xray
+xray api inboundusercount --server=127.0.0.1:10085 --timeout=5 -tag=upstream-in --json >/dev/null
+python3 "\$server_dir/scripts/smoke_server2_direct_vless.py"
+
 echo "server2 subscription deployed"
 if [[ -n "\$origin_secret" ]]; then
   echo "origin secret saved at /root/tgvpn-origin-secret.txt"
@@ -203,14 +235,6 @@ else
   echo "origin secret disabled for direct s2 subscription endpoint"
 fi
 REMOTE_SCRIPT
-
-if [[ "$RESTART_XRAY" == "true" ]]; then
-  log "Restarting and checking Xray on server2"
-  "${ssh_base[@]}" "systemctl restart xray && sleep 3 && systemctl is-active --quiet xray && xray api inboundusercount --server=127.0.0.1:10085 --timeout=5 -tag=upstream-in --json >/dev/null"
-else
-  log "Checking Xray on server2 without restart"
-  "${ssh_base[@]}" "systemctl is-active --quiet xray && xray api inboundusercount --server=127.0.0.1:10085 --timeout=5 -tag=upstream-in --json >/dev/null"
-fi
 
 log "Checking DNS for ${DIRECT_HOST}"
 dns_ips="$(dig +short "$DIRECT_HOST" A 2>/dev/null | tr '\n' ' ' || true)"

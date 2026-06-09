@@ -100,13 +100,21 @@ class SubscriptionSnapshotService:
                 f"{self.settings.xray_remote_user}@{self.settings.xray_remote_host}:{remote_path}",
             ]
         )
-        code, stdout, stderr = await self._run_process(args, env=self._ssh_env())
+        code, stdout, stderr = await self._run_process(
+            args,
+            env=self._ssh_env(),
+            timeout=self.settings.xray_remote_command_timeout_seconds,
+        )
         if code != 0:
             raise RuntimeError(f"Failed to upload subscription snapshot: {stderr.strip() or stdout.strip()}")
 
     async def _run_remote_shell(self, command: str) -> tuple[int, str, str]:
         args = self._ssh_command(command)
-        code, stdout, stderr = await self._run_process(args, env=self._ssh_env())
+        code, stdout, stderr = await self._run_process(
+            args,
+            env=self._ssh_env(),
+            timeout=self.settings.xray_remote_command_timeout_seconds,
+        )
         if code != 0:
             raise RuntimeError(f"Remote subscription command failed: {stderr.strip() or stdout.strip()}")
         return code, stdout, stderr
@@ -137,14 +145,31 @@ class SubscriptionSnapshotService:
         return env
 
     @staticmethod
-    async def _run_process(args: list[str], *, env: dict[str, str] | None = None) -> tuple[int, str, str]:
+    async def _run_process(
+        args: list[str],
+        *,
+        env: dict[str, str] | None = None,
+        timeout: int | None = None,
+    ) -> tuple[int, str, str]:
         process = await asyncio.create_subprocess_exec(
             *args,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
             env=env,
         )
-        stdout, stderr = await process.communicate()
+        try:
+            if timeout and timeout > 0:
+                stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=timeout)
+            else:
+                stdout, stderr = await process.communicate()
+        except TimeoutError:
+            process.kill()
+            stdout, stderr = await process.communicate()
+            return (
+                124,
+                stdout.decode("utf-8", errors="ignore"),
+                (stderr.decode("utf-8", errors="ignore") + f"\ncommand timed out after {timeout}s").strip(),
+            )
         return (
             process.returncode,
             stdout.decode("utf-8", errors="ignore"),

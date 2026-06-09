@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import asyncio
 import json
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
@@ -8,6 +9,7 @@ from types import SimpleNamespace
 from app.db.models import UserStatus
 from app.db.repositories import SubscriptionTokenRepository
 from app.bot.handlers.user import _build_raw_vless_access_text, _build_vpn_access_text
+from app.main import _run_timed_startup_step
 from app.subscription_server import (
     SubscriptionHandler,
     _is_browser_navigation,
@@ -25,6 +27,10 @@ from app.services.subscription_builder import (
 from app.services.subscription_sync_service import build_snapshot_payload
 from app.services.xray_service import XrayService
 from scripts.configure_server2_xray_api import ensure_xray_api
+from scripts.reconcile_server2_xray_users import (
+    runtime_matches,
+    sync_managed_clients_in_config,
+)
 
 
 def _profile() -> SubscriptionProfile:
@@ -410,13 +416,26 @@ def test_server2_xray_api_config_preserves_old_chain_client() -> None:
         "inbounds": [
             {
                 "tag": "upstream-in",
+                "port": 9443,
+                "protocol": "vless",
                 "settings": {
+                    "decryption": "none",
                     "clients": [
                         {
                             "id": "7676d793-32f7-47b5-9444-b1a92bb6b96d",
                             "email": "old-server@chain.local",
                         }
                     ]
+                },
+                "streamSettings": {
+                    "network": "tcp",
+                    "security": "reality",
+                    "realitySettings": {
+                        "target": "www.cloudflare.com:443",
+                        "serverNames": ["www.cloudflare.com"],
+                        "privateKey": "PRIVATE_KEY",
+                        "shortIds": ["a1b2c3d4e5f6a7b8"],
+                    },
                 },
             }
         ],
@@ -427,5 +446,70 @@ def test_server2_xray_api_config_preserves_old_chain_client() -> None:
 
     assert changed is True
     assert config["inbounds"][0]["settings"]["clients"][0]["email"] == "old-server@chain.local"
+    assert "yandex.ru" in config["inbounds"][0]["streamSettings"]["realitySettings"]["serverNames"]
     assert any(inbound["tag"] == "api" for inbound in config["inbounds"])
     assert config["routing"]["rules"][0] == {"type": "field", "inboundTag": ["api"], "outboundTag": "api"}
+
+
+def test_remote_reconcile_config_is_idempotent_and_preserves_unmanaged_clients() -> None:
+    config = {
+        "inbounds": [
+            {
+                "tag": "upstream-in",
+                "settings": {
+                    "clients": [
+                        {"id": "old-chain-id", "email": "old-server@chain.local"},
+                        {"id": "active-id", "email": "user-2@vpn.local", "flow": "xtls-rprx-vision"},
+                    ]
+                },
+            }
+        ]
+    }
+
+    first_changed = sync_managed_clients_in_config(
+        config,
+        inbound_tag="upstream-in",
+        expected={"user-2@vpn.local": "active-id"},
+        flow="xtls-rprx-vision",
+    )
+    second_changed = sync_managed_clients_in_config(
+        config,
+        inbound_tag="upstream-in",
+        expected={"user-2@vpn.local": "active-id"},
+        flow="xtls-rprx-vision",
+    )
+
+    assert first_changed is False
+    assert second_changed is False
+    assert config["inbounds"][0]["settings"]["clients"] == [
+        {"id": "old-chain-id", "email": "old-server@chain.local"},
+        {"id": "active-id", "email": "user-2@vpn.local", "flow": "xtls-rprx-vision"},
+    ]
+
+
+def test_runtime_user_match_skips_existing_same_uuid_user() -> None:
+    stdout = json.dumps(
+        {
+            "user": {
+                "email": "user-2@vpn.local",
+                "account": {"id": "active-id", "flow": "xtls-rprx-vision"},
+            }
+        }
+    )
+
+    assert runtime_matches(
+        stdout,
+        email="user-2@vpn.local",
+        user_uuid="active-id",
+        flow="xtls-rprx-vision",
+    )
+    assert not runtime_matches(
+        stdout,
+        email="user-2@vpn.local",
+        user_uuid="different-id",
+        flow="xtls-rprx-vision",
+    )
+
+
+def test_startup_step_timeout_does_not_escape_to_polling() -> None:
+    asyncio.run(_run_timed_startup_step("slow", asyncio.sleep(0.05), 0.01))

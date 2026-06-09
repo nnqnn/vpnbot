@@ -52,6 +52,12 @@ class Settings(BaseSettings):
     xray_api_server: str = Field(default="127.0.0.1:10085", alias="XRAY_API_SERVER")
     xray_api_timeout_seconds: int = Field(default=5, alias="XRAY_API_TIMEOUT_SECONDS")
     xray_bin_path: str = Field(default="xray", alias="XRAY_BIN_PATH")
+    xray_remote_command_timeout_seconds: int = Field(default=120, alias="XRAY_REMOTE_COMMAND_TIMEOUT_SECONDS")
+    xray_startup_sync_timeout_seconds: int = Field(default=180, alias="XRAY_STARTUP_SYNC_TIMEOUT_SECONDS")
+    xray_remote_helper_path: str = Field(
+        default="/home/tgvpn/scripts/reconcile_server2_xray_users.py",
+        alias="XRAY_REMOTE_HELPER_PATH",
+    )
     xray_remote_host: str = Field(default="", alias="XRAY_REMOTE_HOST")
     xray_remote_user: str = Field(default="root", alias="XRAY_REMOTE_USER")
     xray_remote_port: int = Field(default=22, alias="XRAY_REMOTE_PORT")

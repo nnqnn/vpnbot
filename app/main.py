@@ -48,6 +48,42 @@ async def _sync_xray_state(session_maker, xray_service: XrayService) -> None:
     logger.info("Xray synced users=%s", len(payload))
 
 
+async def _run_timed_startup_step(name: str, awaitable, timeout_seconds: float) -> None:
+    try:
+        await asyncio.wait_for(awaitable, timeout=timeout_seconds)
+    except TimeoutError:
+        logger.error("Startup background step timed out: %s timeout=%ss", name, timeout_seconds)
+    except asyncio.CancelledError:
+        raise
+    except Exception:
+        logger.exception("Startup background step failed: %s", name)
+
+
+async def _run_startup_consistency_tasks(
+    *,
+    billing_service: BillingService,
+    subscription_snapshot_service: SubscriptionSnapshotService,
+    snapshot_enabled: bool,
+    timeout_seconds: float,
+) -> None:
+    await _run_timed_startup_step(
+        "billing state reconcile",
+        billing_service.reconcile_states(),
+        timeout_seconds,
+    )
+    await _run_timed_startup_step(
+        "xray runtime sync",
+        billing_service.sync_xray_runtime_state(),
+        timeout_seconds,
+    )
+    if snapshot_enabled:
+        await _run_timed_startup_step(
+            "subscription snapshot sync",
+            subscription_snapshot_service.sync_once(),
+            timeout_seconds,
+        )
+
+
 async def main() -> None:
     settings = get_settings()
     setup_logging(settings)
@@ -69,14 +105,6 @@ async def main() -> None:
     device_limit_service = DeviceLimitService(settings, session_maker, xray_service)
     subscription_snapshot_service = SubscriptionSnapshotService(settings, session_maker)
 
-    await _sync_xray_state(session_maker, xray_service)
-    await billing_service.reconcile_states()
-    if settings.subscription_snapshot_sync_interval_minutes > 0:
-        try:
-            await subscription_snapshot_service.sync_once()
-        except Exception:
-            logger.exception("Initial subscription snapshot sync failed")
-
     scheduler = SchedulerService(
         settings=settings,
         bot=bot,
@@ -86,6 +114,20 @@ async def main() -> None:
         subscription_snapshot_service=subscription_snapshot_service,
     )
     scheduler.start()
+
+    startup_tasks: set[asyncio.Task] = set()
+    if settings.xray_startup_sync_timeout_seconds > 0:
+        task = asyncio.create_task(
+            _run_startup_consistency_tasks(
+                billing_service=billing_service,
+                subscription_snapshot_service=subscription_snapshot_service,
+                snapshot_enabled=settings.subscription_snapshot_sync_interval_minutes > 0,
+                timeout_seconds=settings.xray_startup_sync_timeout_seconds,
+            ),
+            name="startup-consistency-sync",
+        )
+        startup_tasks.add(task)
+        task.add_done_callback(startup_tasks.discard)
 
     logger.info("Bot is starting polling")
     try:
@@ -100,6 +142,10 @@ async def main() -> None:
             subscription_snapshot_service=subscription_snapshot_service,
         )
     finally:
+        for task in list(startup_tasks):
+            task.cancel()
+        if startup_tasks:
+            await asyncio.gather(*startup_tasks, return_exceptions=True)
         await scheduler.shutdown()
         await bot.session.close()
         await engine.dispose()

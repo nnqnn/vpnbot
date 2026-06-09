@@ -213,6 +213,7 @@ fi
 ".venv/bin/python" -m compileall -q app scripts tests
 
 log "Restarting ${service}"
+restart_started_at="$(date '+%Y-%m-%d %H:%M:%S')"
 if ! systemctl restart "$service"; then
   rollback "Failed to restart ${service}."
   exit 1
@@ -221,6 +222,25 @@ fi
 sleep 3
 if ! systemctl is-active --quiet "$service"; then
   rollback "${service} is not active after restart."
+  exit 1
+fi
+
+polling_ready=false
+for _ in $(seq 1 45); do
+  if journalctl -u "$service" --since "$restart_started_at" --no-pager | grep -q "Bot is starting polling"; then
+    polling_ready=true
+    break
+  fi
+  sleep 1
+done
+if [[ "$polling_ready" != "true" ]]; then
+  rollback "${service} did not reach polling within 45 seconds."
+  exit 1
+fi
+
+log "Syncing subscription snapshot to server2"
+if ! ".venv/bin/python" scripts/sync_subscription_snapshot.py; then
+  rollback "Failed to sync subscription snapshot after deploy."
   exit 1
 fi
 
