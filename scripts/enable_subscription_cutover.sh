@@ -138,14 +138,15 @@ PY
 
 curl -fsS --compressed "${public_base_url%/}/add/${product}/${token}" >/dev/null
 
-PUBLIC_BASE_URL="$public_base_url" ".venv/bin/python" - <<'PY'
-import os
+".venv/bin/python" - "$public_base_url" <<'PY'
+import sys
 from pathlib import Path
 
+public_base_url = sys.argv[1]
 path = Path(".env")
 updates = {
     "SUBSCRIPTION_LINKS_ENABLED": "true",
-    "SUBSCRIPTION_PUBLIC_BASE_URL": os.environ["PUBLIC_BASE_URL"],
+    "SUBSCRIPTION_PUBLIC_BASE_URL": public_base_url,
 }
 lines = path.read_text(encoding="utf-8").splitlines()
 seen = set()
