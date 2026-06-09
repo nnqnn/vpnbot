@@ -231,9 +231,19 @@ cp "\$server_dir/deploy/systemd/tgvpn-subscription.service" /etc/systemd/system/
 systemctl daemon-reload
 systemctl enable --now tgvpn-subscription.service
 systemctl restart tgvpn-subscription.service
-sleep 2
-systemctl is-active --quiet tgvpn-subscription.service
-curl -fsS "http://127.0.0.1:\$subscription_port/healthz" >/dev/null
+for _ in \$(seq 1 20); do
+  if systemctl is-active --quiet tgvpn-subscription.service \
+    && curl -fsS "http://127.0.0.1:\$subscription_port/healthz" >/dev/null; then
+    subscription_ready=true
+    break
+  fi
+  sleep 1
+done
+if [[ "\${subscription_ready:-false}" != "true" ]]; then
+  systemctl status tgvpn-subscription.service --no-pager || true
+  journalctl -u tgvpn-subscription.service -n 80 --no-pager || true
+  exit 1
+fi
 
 if [[ "\$xray_config_changed" == "true" || "\$restart_xray" == "true" ]]; then
   echo "restarting xray after config change or explicit request"
