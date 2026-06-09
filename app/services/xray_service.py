@@ -48,14 +48,20 @@ class XrayService:
     async def enable_user(self, telegram_id: int, user_uuid: str) -> None:
         email = self.user_email(telegram_id)
         if self._is_api_mode():
-            await self._add_user_via_api(email=email, user_uuid=user_uuid)
+            async with self._lock:
+                await self._add_user_via_api_unlocked(email=email, user_uuid=user_uuid)
+                if self._is_ssh_api_mode():
+                    await self._persist_remote_config_upsert_unlocked(email=email, user_uuid=user_uuid)
             return
         await self._upsert_client(email=email, user_uuid=user_uuid)
 
     async def disable_user(self, telegram_id: int) -> None:
         email = self.user_email(telegram_id)
         if self._is_api_mode():
-            await self._remove_user_via_api(email=email)
+            async with self._lock:
+                await self._remove_user_via_api_unlocked(email=email)
+                if self._is_ssh_api_mode():
+                    await self._persist_remote_config_remove_unlocked(email=email)
             return
         await self._remove_client(email=email)
 
@@ -124,6 +130,8 @@ class XrayService:
                 await self._remove_user_via_api_unlocked(email=email)
             for email, user_uuid in expected_by_email.items():
                 await self._add_user_via_api_unlocked(email=email, user_uuid=user_uuid)
+            if self._is_ssh_api_mode():
+                await self._persist_remote_config_sync_unlocked(expected_by_email)
 
     async def get_user_traffic(self, telegram_id: int) -> tuple[int, int] | None:
         if not self.settings.xray_api_enabled:
@@ -338,6 +346,34 @@ class XrayService:
             backup_path.write_text(config_path.read_text(encoding="utf-8"), encoding="utf-8")
         config_path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
 
+    async def _write_config_async(self, data: dict[str, Any]) -> None:
+        if not self._is_ssh_api_mode():
+            await asyncio.to_thread(self._write_config, data)
+            return
+
+        config_file = await asyncio.to_thread(self._write_temp_json, data)
+        remote_config = str(self.settings.xray_config_path)
+        remote_tmp = f"{remote_config}.tmp-{os.getpid()}-{Path(config_file).name}"
+        remote_backup = f"{remote_config}.bak.tgvpn-sync"
+        try:
+            upload_code, upload_stdout, upload_stderr = await self._scp_to_remote(config_file, remote_tmp)
+            if upload_code != 0:
+                raise RuntimeError(f"Failed to upload remote Xray config: {upload_stderr.strip() or upload_stdout.strip()}")
+
+            command = " && ".join(
+                [
+                    f"{shlex.quote(self.settings.xray_bin_path)} run -test -c {shlex.quote(remote_tmp)}",
+                    f"cp {shlex.quote(remote_config)} {shlex.quote(remote_backup)}",
+                    f"mv {shlex.quote(remote_tmp)} {shlex.quote(remote_config)}",
+                ]
+            )
+            code, stdout, stderr = await self._run_remote_shell_command(command)
+            if code != 0:
+                raise RuntimeError(f"Failed to persist remote Xray config: {stderr.strip() or stdout.strip()}")
+        finally:
+            await self._run_remote_shell_command(f"rm -f {shlex.quote(remote_tmp)}")
+            await asyncio.to_thread(self._safe_unlink, config_file)
+
     def _find_inbound(self, config: dict[str, Any]) -> dict[str, Any]:
         inbounds = config.get("inbounds")
         if not isinstance(inbounds, list):
@@ -346,6 +382,61 @@ class XrayService:
             if inbound.get("tag") == self.settings.xray_inbound_tag:
                 return inbound
         raise ValueError(f"Inbound tag '{self.settings.xray_inbound_tag}' was not found")
+
+    async def _persist_remote_config_upsert_unlocked(self, email: str, user_uuid: str) -> None:
+        config = await self._read_config_async()
+        if self._upsert_managed_client_in_config(config, email=email, user_uuid=user_uuid):
+            await self._write_config_async(config)
+
+    async def _persist_remote_config_remove_unlocked(self, email: str) -> None:
+        config = await self._read_config_async()
+        if self._remove_managed_client_from_config(config, email=email):
+            await self._write_config_async(config)
+
+    async def _persist_remote_config_sync_unlocked(self, expected_by_email: dict[str, str]) -> None:
+        config = await self._read_config_async()
+        if self._sync_managed_clients_in_config(config, expected_by_email):
+            await self._write_config_async(config)
+
+    def _upsert_managed_client_in_config(self, config: dict[str, Any], *, email: str, user_uuid: str) -> bool:
+        inbound = self._find_inbound(config)
+        clients: list[dict[str, Any]] = inbound.setdefault("settings", {}).setdefault("clients", [])
+        next_client = self._build_client(user_uuid=user_uuid, email=email)
+        for index, client in enumerate(clients):
+            if client.get("email") == email:
+                if client == next_client:
+                    return False
+                clients[index] = next_client
+                return True
+        clients.append(next_client)
+        return True
+
+    def _remove_managed_client_from_config(self, config: dict[str, Any], *, email: str) -> bool:
+        inbound = self._find_inbound(config)
+        clients: list[dict[str, Any]] = inbound.setdefault("settings", {}).setdefault("clients", [])
+        updated = [client for client in clients if client.get("email") != email]
+        if len(updated) == len(clients):
+            return False
+        inbound["settings"]["clients"] = updated
+        return True
+
+    def _sync_managed_clients_in_config(self, config: dict[str, Any], expected_by_email: dict[str, str]) -> bool:
+        inbound = self._find_inbound(config)
+        clients: list[dict[str, Any]] = inbound.setdefault("settings", {}).setdefault("clients", [])
+        non_managed_clients = [
+            client
+            for client in clients
+            if not self._is_managed_email(client.get("email") if isinstance(client, dict) else None)
+        ]
+        expected_clients = [
+            self._build_client(user_uuid=expected_by_email[email], email=email)
+            for email in sorted(expected_by_email)
+        ]
+        updated = non_managed_clients + expected_clients
+        if clients == updated:
+            return False
+        inbound["settings"]["clients"] = updated
+        return True
 
     @staticmethod
     def _extract_stat_value(stats_output: str, direction: str) -> int | None:

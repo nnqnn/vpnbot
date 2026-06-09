@@ -373,6 +373,38 @@ def test_old_chain_client_is_not_managed_by_bot() -> None:
     assert XrayService._is_managed_email("old-server@chain.local") is False
 
 
+def test_remote_xray_config_sync_preserves_old_chain_and_removes_stale_users() -> None:
+    service = XrayService(SimpleNamespace(xray_inbound_tag="upstream-in", vless_flow="xtls-rprx-vision"))
+    config = {
+        "inbounds": [
+            {
+                "tag": "upstream-in",
+                "settings": {
+                    "clients": [
+                        {"id": "old-chain-id", "email": "old-server@chain.local"},
+                        {"id": "stale-id", "email": "user-1@vpn.local", "flow": "xtls-rprx-vision"},
+                    ]
+                },
+            }
+        ]
+    }
+
+    changed = service._sync_managed_clients_in_config(
+        config,
+        {
+            "user-2@vpn.local": "active-id-2",
+            "user-3@vpn.local": "active-id-3",
+        },
+    )
+
+    clients = config["inbounds"][0]["settings"]["clients"]
+    assert changed is True
+    assert {"id": "old-chain-id", "email": "old-server@chain.local"} in clients
+    assert {"id": "stale-id", "email": "user-1@vpn.local", "flow": "xtls-rprx-vision"} not in clients
+    assert {"id": "active-id-2", "email": "user-2@vpn.local", "flow": "xtls-rprx-vision"} in clients
+    assert {"id": "active-id-3", "email": "user-3@vpn.local", "flow": "xtls-rprx-vision"} in clients
+
+
 def test_server2_xray_api_config_preserves_old_chain_client() -> None:
     config = {
         "inbounds": [
