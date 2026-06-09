@@ -1,0 +1,23 @@
+[Unit]
+Description=Telegram VPN Happ subscription endpoint
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+Group=root
+WorkingDirectory=/home/tgvpn
+EnvironmentFile=/home/tgvpn/.env.subscription
+ExecStart=/usr/bin/python3 -m app.subscription_server
+Restart=always
+RestartSec=5
+TimeoutStopSec=30
+StandardOutput=journal
+StandardError=journal
+NoNewPrivileges=true
+PrivateTmp=true
+LimitNOFILE=65535
+
+[Install]
+WantedBy=multi-user.target

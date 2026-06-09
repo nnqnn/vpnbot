@@ -102,6 +102,17 @@ class ProductPurchase(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
 
+class SubscriptionToken(Base):
+    __tablename__ = "subscription_tokens"
+    __table_args__ = (UniqueConstraint("token", name="uq_subscription_tokens_token"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False, index=True)
+    token: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
 class PartnerReferralLink(Base):
     __tablename__ = "partner_referral_links"
 

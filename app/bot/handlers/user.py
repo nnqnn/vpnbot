@@ -19,11 +19,20 @@ from app.bot.keyboards import (
     vpn_tariffs_menu,
 )
 from app.config import Settings
-from app.db.repositories import ReferralRepository, UserPolicyRepository, UserRepository
-from app.services.billing_service import BillingService
+from app.db.repositories import (
+    ProductPurchaseRepository,
+    ReferralRepository,
+    SubscriptionTokenRepository,
+    UserPolicyRepository,
+    UserRepository,
+)
+from app.services.billing_service import BillingService, WHITELIST_PRODUCT_CODE
 from app.services.payment_service import PaymentProviderError, TelegaPayService
+from app.services.subscription_builder import build_happ_link, build_happ_redirect_url, build_subscription_url
+from app.services.subscription_sync_service import SubscriptionSnapshotService
 from app.services.user_service import UserService
 from app.services.xray_service import XrayService
+from app.utils.time import localize, utc_now
 
 user_router = Router(name="user-router")
 logger = logging.getLogger(__name__)
@@ -82,6 +91,51 @@ def _referral_promo_text(settings: Settings) -> str:
         f"КАЖДЫЙ ПРИГЛАШЕННЫЙ ПОЛЬЗОВАТЕЛЬ = +{settings.referral_bonus_days} бесплатных дня.\n\n"
         f"{settings.referral_paid_invites_for_year_reward} оплативших подписку рефералов = "
         f"+{settings.referral_year_reward_days} бесплатных дней VPN."
+    )
+
+
+def _build_vpn_access_text(
+    *,
+    settings: Settings,
+    main_status: str,
+    whitelist_status: str,
+    happ_open_url: str,
+    happ_link: str,
+    https_link: str,
+) -> str:
+    return (
+        "🔐 <b>Мой VPN</b>\n\n"
+        f"Основной VPN: <b>{main_status}</b>\n"
+        f"Обход белых списков: <b>{whitelist_status}</b>\n\n"
+        "Для подключения установите <a href=\"https://happ.su\">Happ</a> и нажмите ссылку ниже:\n"
+        f"<a href=\"{escape(happ_open_url)}\">Добавить подписку в Happ</a>\n\n"
+        "Deep link для ручного открытия:\n"
+        f"<code>{escape(happ_link)}</code>\n\n"
+        "Если приложение не открылось автоматически, импортируйте HTTPS-ссылку вручную:\n"
+        f"<code>{escape(https_link)}</code>\n\n"
+        "Подписка обновляется автоматически. В ней отображаются только доступные вам узлы: "
+        "основной VPN по активному сроку и обход белых списков после разовой покупки.\n\n"
+        "Доп. инструкция: https://t.me/kvpnpublic/2\n\n"
+        f"Техническая поддержка, если необходима помощь: {settings.support_url}"
+    )
+
+
+def _build_raw_vless_access_text(*, settings: Settings, link: str) -> str:
+    return (
+        "🔐 <b>Мой VPN</b>\n\n"
+        "Для простого подключения на любом устройстве скачайте "
+        "<a href=\"https://happ.su\">Happ</a>.\n\n"
+        "<b>Инструкция по подключению:</b>\n"
+        "1) Скопируйте ваш VPN-ключ целиком (текст ниже).\n"
+        "2) Откройте Happ.\n"
+        "3) Нажмите на плюсик (+).\n"
+        "4) Выберите «Вставить из буфера».\n"
+        "5) Подключитесь к созданному профилю.\n\n"
+        "Ваш VPN-ключ:\n"
+        f"<code>{escape(link)}</code>\n\n"
+        "Если вы используете другое приложение, можно подключиться этим же ключом.\n\n"
+        "Доп. инструкция: https://t.me/kvpnpublic/2\n\n"
+        f"Техническая поддержка, если необходима помощь: {settings.support_url}"
     )
 
 
@@ -371,6 +425,7 @@ async def vpn_link_handler(
     xray_service: XrayService,
     settings: Settings,
     bot: Bot,
+    subscription_snapshot_service: SubscriptionSnapshotService | None = None,
 ) -> None:
     user = await _get_user(session, callback.from_user.id)
     if user is None:
@@ -379,23 +434,58 @@ async def vpn_link_handler(
     if not await _ensure_access_for_callback(callback, session, settings, bot, user):
         return
 
-    link = xray_service.build_vless_link(str(user.uuid), user.telegram_id)
+    if not settings.subscription_links_enabled:
+        link = xray_service.build_vless_link(str(user.uuid), user.telegram_id)
+        await callback.message.edit_text(
+            _build_raw_vless_access_text(settings=settings, link=link),
+            reply_markup=main_menu(is_admin=settings.is_admin(callback.from_user.id)),
+        )
+        await callback.answer()
+        return
+
+    token = await SubscriptionTokenRepository(session).get_or_create_for_user(user.id)
+    has_whitelist = await ProductPurchaseRepository(session).has_user_product(user.id, WHITELIST_PRODUCT_CODE)
+    now = utc_now()
+    main_vpn_active = (
+        user.status.value == "active"
+        and not user.device_limit_blocked
+        and user.expiration_date is not None
+        and user.expiration_date > now
+    )
+    https_link = build_subscription_url(
+        settings.subscription_public_base_url,
+        settings.subscription_product,
+        token.token,
+    )
+    happ_link = build_happ_link(https_link)
+    happ_open_url = build_happ_redirect_url(
+        settings.subscription_public_base_url,
+        settings.subscription_product,
+        token.token,
+    )
+
+    await session.commit()
+    if subscription_snapshot_service is not None and settings.subscription_snapshot_sync_interval_minutes > 0:
+        try:
+            await subscription_snapshot_service.sync_once()
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Cannot sync subscription snapshot after link request: %s", exc)
+
+    if user.expiration_date and user.expiration_date > now:
+        expires_text = localize(user.expiration_date, settings.timezone).strftime("%d.%m.%Y %H:%M")
+    else:
+        expires_text = "нет активного срока"
+    main_status = f"активен до {expires_text}" if main_vpn_active else "не активен"
+    whitelist_status = "доступен" if has_whitelist else "не куплен"
+
     await callback.message.edit_text(
-        (
-            "🔐 <b>Мой VPN</b>\n\n"
-            "Для простого подключения на любом устройстве скачайте "
-            "<a href=\"https://happ.su\">Happ</a>.\n\n"
-            "<b>Инструкция по подключению:</b>\n"
-            "1) Скопируйте ваш VPN-ключ целиком (текст ниже).\n"
-            "2) Откройте Happ.\n"
-            "3) Нажмите на плюсик (+).\n"
-            "4) Выберите «Вставить из буфера».\n"
-            "5) Подключитесь к созданному профилю.\n\n"
-            "Ваш VPN-ключ:\n"
-            f"<code>{escape(link)}</code>\n\n"
-            "Если вы используете другое приложение, можно подключиться этим же ключом.\n\n"
-            "Доп. инструкция: https://t.me/kvpnpublic/2\n\n"
-            f"Техническая поддержка, если необходима помощь: {settings.support_url}"
+        _build_vpn_access_text(
+            settings=settings,
+            main_status=main_status,
+            whitelist_status=whitelist_status,
+            happ_open_url=happ_open_url,
+            happ_link=happ_link,
+            https_link=https_link,
         ),
         reply_markup=main_menu(is_admin=settings.is_admin(callback.from_user.id)),
     )

@@ -416,6 +416,60 @@ sudo systemctl restart tgvpn-bot
 - Для `config`-режима это обязательно (правка `xray config` + `reload/restart`).
 - Для `api`-режима можно запускать от отдельного пользователя, если ему доступен бинарник `xray` и локальный API-порт.
 
+## 9) Direct server #2 + Happ subscription
+
+Целевая схема:
+
+```text
+Bot/PostgreSQL на server #1 -> snapshot + Xray API по SSH -> server #2
+Пользователь -> vpn.nnqnn.tech Worker -> s2.nnqnn.tech HTTPS endpoint
+Пользовательский VLESS Reality -> s2.nnqnn.tech:9443
+```
+
+Server #1 Xray/Apache не нужны для новой подписки и не меняются. Старая цепочка может работать параллельно.
+
+На server #1 в `.env` включите:
+
+```bash
+XRAY_CONTROL_MODE=ssh_api
+XRAY_INBOUND_TAG=upstream-in
+XRAY_CONFIG_PATH=/usr/local/etc/xray/config.json
+XRAY_API_ENABLED=true
+XRAY_API_SERVER=127.0.0.1:10085
+XRAY_REMOTE_HOST=89.125.50.96
+XRAY_REMOTE_USER=root
+XRAY_REMOTE_PORT=22
+XRAY_REMOTE_KEY_PATH=
+XRAY_REMOTE_PASSWORD=SERVER2_ROOT_PASSWORD_OR_EMPTY_IF_KEY_AUTH
+
+VLESS_PUBLIC_HOST=s2.nnqnn.tech
+VLESS_PUBLIC_PORT=9443
+VLESS_SNI=www.cloudflare.com
+VLESS_PBK=SERVER2_REALITY_PUBLIC_KEY
+VLESS_SID=a1b2c3d4e5f6a7b8
+
+SUBSCRIPTION_PUBLIC_BASE_URL=https://vpn.nnqnn.tech
+SUBSCRIPTION_LINKS_ENABLED=false
+SUBSCRIPTION_SNAPSHOT_SYNC_INTERVAL_MINUTES=1
+SUBSCRIPTION_REMOTE_SNAPSHOT_PATH=/var/lib/tgvpn/subscription_snapshot.json
+```
+
+Оставьте `SUBSCRIPTION_LINKS_ENABLED=false`, пока `s2.nnqnn.tech` и Worker не готовы. После проверки публичной подписки переключите на `true`, чтобы бот начал выдавать Happ-ссылки вместо старого raw VLESS-ключа.
+
+На server #2:
+
+```bash
+SUBSCRIPTION_SERVER2_VLESS_PBK="SERVER2_REALITY_PUBLIC_KEY" \
+TGVPN_SERVER2_PASSWORD="SERVER2_ROOT_PASSWORD" \
+scripts/deploy_server2_subscription.sh
+```
+
+Для HTTPS origin используйте `deploy/nginx/s2.nnqnn.tech.conf`. DNS `s2.nnqnn.tech` должен быть DNS-only A record на `89.125.50.96`.
+
+Worker для `vpn.nnqnn.tech` лежит в `deploy/cloudflare/vpn-nnqnn-worker.js`. Secret `ORIGIN_SECRET` в Worker должен совпадать с `SUBSCRIPTION_ORIGIN_SECRET` на server #2. Worker обслуживает:
+- `/sub/kVPN/<token>`: прокси к server #2 origin;
+- `/add/kVPN/<token>`: HTTPS-страница для Telegram, которая открывает `happ://add/https://...`.
+
 ## Безопасность
 
 - Все admin-действия ограничены `SUPER_ADMIN_ID`

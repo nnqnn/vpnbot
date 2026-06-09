@@ -52,12 +52,50 @@ class Settings(BaseSettings):
     xray_api_server: str = Field(default="127.0.0.1:10085", alias="XRAY_API_SERVER")
     xray_api_timeout_seconds: int = Field(default=5, alias="XRAY_API_TIMEOUT_SECONDS")
     xray_bin_path: str = Field(default="xray", alias="XRAY_BIN_PATH")
+    xray_remote_host: str = Field(default="", alias="XRAY_REMOTE_HOST")
+    xray_remote_user: str = Field(default="root", alias="XRAY_REMOTE_USER")
+    xray_remote_port: int = Field(default=22, alias="XRAY_REMOTE_PORT")
+    xray_remote_key_path: str = Field(default="", alias="XRAY_REMOTE_KEY_PATH")
+    xray_remote_password: str = Field(default="", alias="XRAY_REMOTE_PASSWORD")
 
     auto_renew_interval_minutes: int = Field(default=30, alias="AUTO_RENEW_INTERVAL_MINUTES")
     payment_poll_interval_seconds: int = Field(default=60, alias="PAYMENT_POLL_INTERVAL_SECONDS")
     xray_sync_interval_minutes: int = Field(default=5, alias="XRAY_SYNC_INTERVAL_MINUTES")
     device_limit_interval_minutes: int = Field(default=10, alias="DEVICE_LIMIT_INTERVAL_MINUTES")
     notify_interval_minutes: int = Field(default=30, alias="NOTIFY_INTERVAL_MINUTES")
+
+    subscription_product: str = Field(default="kVPN", alias="SUBSCRIPTION_PRODUCT")
+    subscription_public_base_url: str = Field(
+        default="https://vpn.nnqnn.tech",
+        alias="SUBSCRIPTION_PUBLIC_BASE_URL",
+    )
+    subscription_profile_title: str = Field(default="kVPN @kkVPNrobot", alias="SUBSCRIPTION_PROFILE_TITLE")
+    subscription_update_interval_hours: int = Field(default=1, alias="SUBSCRIPTION_UPDATE_INTERVAL_HOURS")
+    subscription_traffic_total_bytes: int = Field(default=0, alias="SUBSCRIPTION_TRAFFIC_TOTAL_BYTES")
+    subscription_announce_text: str = Field(
+        default="kVPN: подписка обновляется автоматически.",
+        alias="SUBSCRIPTION_ANNOUNCE_TEXT",
+    )
+    subscription_announce_url: str = Field(default="https://t.me/kvpnpublic", alias="SUBSCRIPTION_ANNOUNCE_URL")
+    subscription_snapshot_path: Path = Field(
+        default=Path("./logs/subscription_snapshot.json"),
+        alias="SUBSCRIPTION_SNAPSHOT_PATH",
+    )
+    subscription_links_enabled: bool = Field(default=False, alias="SUBSCRIPTION_LINKS_ENABLED")
+    subscription_remote_snapshot_path: str = Field(
+        default="/var/lib/tgvpn/subscription_snapshot.json",
+        alias="SUBSCRIPTION_REMOTE_SNAPSHOT_PATH",
+    )
+    subscription_snapshot_sync_interval_minutes: int = Field(
+        default=0,
+        alias="SUBSCRIPTION_SNAPSHOT_SYNC_INTERVAL_MINUTES",
+    )
+    subscription_origin_secret: str = Field(default="", alias="SUBSCRIPTION_ORIGIN_SECRET")
+    whitelist_source_url: str = Field(
+        default="https://raw.githubusercontent.com/zieng2/wl/main/vless_universal.txt",
+        alias="WHITELIST_SOURCE_URL",
+    )
+    whitelist_max_nodes: int = Field(default=300, alias="WHITELIST_MAX_NODES")
 
     log_level: str = Field(default="INFO", alias="LOG_LEVEL")
     log_dir: Path = Field(default=Path("./logs"), alias="LOG_DIR")

@@ -11,6 +11,7 @@ from app.config import Settings
 from app.services.billing_service import BillingService
 from app.services.device_limit_service import DeviceLimitService
 from app.services.payment_service import TelegaPayService
+from app.services.subscription_sync_service import SubscriptionSnapshotService
 
 logger = logging.getLogger(__name__)
 
@@ -23,12 +24,14 @@ class SchedulerService:
         billing_service: BillingService,
         payment_service: TelegaPayService,
         device_limit_service: DeviceLimitService,
+        subscription_snapshot_service: SubscriptionSnapshotService | None = None,
     ) -> None:
         self.settings = settings
         self.bot = bot
         self.billing_service = billing_service
         self.payment_service = payment_service
         self.device_limit_service = device_limit_service
+        self.subscription_snapshot_service = subscription_snapshot_service
         self.scheduler = AsyncIOScheduler(timezone=ZoneInfo(settings.timezone))
 
     def start(self) -> None:
@@ -51,6 +54,14 @@ class SchedulerService:
                 self._xray_sync_job,
                 trigger=IntervalTrigger(minutes=self.settings.xray_sync_interval_minutes),
                 id="xray_sync_job",
+                max_instances=1,
+                coalesce=True,
+            )
+        if self.subscription_snapshot_service is not None and self.settings.subscription_snapshot_sync_interval_minutes > 0:
+            self.scheduler.add_job(
+                self._subscription_snapshot_job,
+                trigger=IntervalTrigger(minutes=self.settings.subscription_snapshot_sync_interval_minutes),
+                id="subscription_snapshot_job",
                 max_instances=1,
                 coalesce=True,
             )
@@ -96,6 +107,11 @@ class SchedulerService:
 
     async def _xray_sync_job(self) -> None:
         await self.billing_service.sync_xray_runtime_state()
+
+    async def _subscription_snapshot_job(self) -> None:
+        if self.subscription_snapshot_service is None:
+            return
+        await self.subscription_snapshot_service.sync_once()
 
     async def _notify_job(self) -> None:
         await self.billing_service.send_expiration_warnings(self.bot)

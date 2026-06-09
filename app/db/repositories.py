@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
+import secrets
 
 from sqlalchemy import Select, case, func, or_, select, union
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -19,6 +20,7 @@ from app.db.models import (
     ReferralYearReward,
     SubscriptionCharge,
     SubscriptionChargeSource,
+    SubscriptionToken,
     User,
     UserPolicy,
     UserStatus,
@@ -356,6 +358,72 @@ class ProductPurchaseRepository:
         query = select(User).join(user_ids, User.id == user_ids.c.user_id).order_by(User.id.asc())
         result = await self.session.execute(query)
         return list(result.scalars().all())
+
+    async def user_ids_by_product_code(self, product_code: str) -> set[int]:
+        product_user_ids = select(ProductPurchase.user_id.label("user_id")).where(
+            ProductPurchase.product_code == product_code
+        )
+        legacy_deferred_user_ids = select(DeferredTariffPurchase.user_id.label("user_id")).where(
+            DeferredTariffPurchase.tariff_code == product_code,
+            DeferredTariffPurchase.applied_at.is_not(None),
+        )
+        user_ids = union(product_user_ids, legacy_deferred_user_ids).subquery()
+        result = await self.session.execute(select(user_ids.c.user_id))
+        return {int(user_id) for (user_id,) in result.all()}
+
+    async def has_user_product(self, user_id: int, product_code: str) -> bool:
+        product_user_ids = select(ProductPurchase.user_id.label("user_id")).where(
+            ProductPurchase.user_id == user_id,
+            ProductPurchase.product_code == product_code,
+        )
+        legacy_deferred_user_ids = select(DeferredTariffPurchase.user_id.label("user_id")).where(
+            DeferredTariffPurchase.user_id == user_id,
+            DeferredTariffPurchase.tariff_code == product_code,
+            DeferredTariffPurchase.applied_at.is_not(None),
+        )
+        user_ids = union(product_user_ids, legacy_deferred_user_ids).subquery()
+        result = await self.session.execute(select(user_ids.c.user_id).limit(1))
+        return result.first() is not None
+
+
+class SubscriptionTokenRepository:
+    def __init__(self, session: AsyncSession) -> None:
+        self.session = session
+
+    async def get_active_for_user(self, user_id: int) -> SubscriptionToken | None:
+        query: Select[tuple[SubscriptionToken]] = (
+            select(SubscriptionToken)
+            .where(
+                SubscriptionToken.user_id == user_id,
+                SubscriptionToken.revoked_at.is_(None),
+            )
+            .order_by(SubscriptionToken.created_at.desc(), SubscriptionToken.id.desc())
+            .limit(1)
+        )
+        result = await self.session.execute(query)
+        return result.scalar_one_or_none()
+
+    async def get_by_token(self, token: str) -> SubscriptionToken | None:
+        query: Select[tuple[SubscriptionToken]] = select(SubscriptionToken).where(
+            SubscriptionToken.token == token,
+            SubscriptionToken.revoked_at.is_(None),
+        )
+        result = await self.session.execute(query)
+        return result.scalar_one_or_none()
+
+    async def get_or_create_for_user(self, user_id: int) -> SubscriptionToken:
+        existing = await self.get_active_for_user(user_id)
+        if existing is not None:
+            return existing
+
+        token = SubscriptionToken(user_id=user_id, token=self._new_token())
+        self.session.add(token)
+        await self.session.flush()
+        return token
+
+    @staticmethod
+    def _new_token() -> str:
+        return secrets.token_urlsafe(32)
 
 
 class PartnerReferralLinkRepository:

@@ -479,8 +479,10 @@ class BillingService:
 
     def _instruction_delivery_text(self, balance_after_charge: Decimal) -> str:
         return (
-            "✅ Покупка успешна: «Инструкция по обходу белых списков».\n"
-            "Ссылка на инструкцию:\n"
+            "✅ Покупка успешна: «Обход белых списков».\n"
+            "Доступ добавлен в вашу персональную Happ-подписку.\n"
+            "Откройте «Мой VPN» и импортируйте подписку заново, если она уже была добавлена.\n\n"
+            "Дополнительная инструкция:\n"
             f"{self.settings.whitelist_instruction_url}\n\n"
             f"Баланс: {balance_after_charge} ₽"
         )

@@ -6,6 +6,7 @@ import json
 import logging
 import os
 import re
+import shlex
 import tempfile
 from pathlib import Path
 from typing import Any
@@ -246,11 +247,8 @@ class XrayService:
             await self._add_user_via_api_unlocked(email=email, user_uuid=user_uuid)
 
     async def _add_user_via_api_unlocked(self, email: str, user_uuid: str) -> None:
-        payload = await asyncio.to_thread(
-            self._build_adu_payload_from_config,
-            email,
-            user_uuid,
-        )
+        config = await self._read_config_async()
+        payload = self._build_adu_payload_from_config(config, email, user_uuid)
         code, stdout, stderr = await self._run_adu_with_payload(payload)
         if code == 0 and self._adu_added_users_count(stdout) > 0:
             return
@@ -276,6 +274,9 @@ class XrayService:
         raise RuntimeError("Failed to add user via Xray API")
 
     async def _run_adu_with_payload(self, payload: dict[str, Any]) -> tuple[int, str, str]:
+        if self._is_ssh_api_mode():
+            return await self._run_remote_adu_with_payload(payload)
+
         config_file = await asyncio.to_thread(self._write_temp_json, payload)
         try:
             code, stdout, stderr = await self._run_args_command(
@@ -285,8 +286,7 @@ class XrayService:
             await asyncio.to_thread(self._safe_unlink, config_file)
         return code, stdout, stderr
 
-    def _build_adu_payload_from_config(self, email: str, user_uuid: str) -> dict[str, Any]:
-        config = self._read_config()
+    def _build_adu_payload_from_config(self, config: dict[str, Any], email: str, user_uuid: str) -> dict[str, Any]:
         inbound = copy.deepcopy(self._find_inbound(config))
         inbound.setdefault("settings", {})
         inbound["settings"]["clients"] = [self._build_client(user_uuid=user_uuid, email=email)]
@@ -319,6 +319,17 @@ class XrayService:
         if not config_path.exists():
             raise FileNotFoundError(f"Xray config not found: {config_path}")
         return json.loads(config_path.read_text(encoding="utf-8"))
+
+    async def _read_config_async(self) -> dict[str, Any]:
+        if not self._is_ssh_api_mode():
+            return await asyncio.to_thread(self._read_config)
+
+        code, stdout, stderr = await self._run_remote_shell_command(
+            f"cat {shlex.quote(str(self.settings.xray_config_path))}"
+        )
+        if code != 0:
+            raise RuntimeError(f"Failed to read remote Xray config: {stderr.strip() or stdout.strip()}")
+        return json.loads(stdout)
 
     def _write_config(self, data: dict[str, Any]) -> None:
         config_path = self.settings.xray_config_path
@@ -385,7 +396,10 @@ class XrayService:
             return 0
 
     def _is_api_mode(self) -> bool:
-        return self.settings.xray_control_mode.strip().lower() == "api"
+        return self.settings.xray_control_mode.strip().lower() in {"api", "ssh_api", "remote_api"}
+
+    def _is_ssh_api_mode(self) -> bool:
+        return self.settings.xray_control_mode.strip().lower() in {"ssh_api", "remote_api"}
 
     @staticmethod
     def _write_temp_json(payload: dict[str, Any]) -> str:
@@ -415,12 +429,97 @@ class XrayService:
             stderr.decode("utf-8", errors="ignore"),
         )
 
-    @staticmethod
-    async def _run_args_command(args: list[str]) -> tuple[int, str, str]:
+    async def _run_args_command(self, args: list[str]) -> tuple[int, str, str]:
+        if self._is_ssh_api_mode():
+            return await self._run_remote_args_command(args)
+
         process = await asyncio.create_subprocess_exec(
             *args,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
+        )
+        stdout, stderr = await process.communicate()
+        return (
+            process.returncode,
+            stdout.decode("utf-8", errors="ignore"),
+            stderr.decode("utf-8", errors="ignore"),
+        )
+
+    async def _run_remote_args_command(self, args: list[str]) -> tuple[int, str, str]:
+        command = " ".join(shlex.quote(str(arg)) for arg in args)
+        return await self._run_remote_shell_command(command)
+
+    async def _run_remote_adu_with_payload(self, payload: dict[str, Any]) -> tuple[int, str, str]:
+        config_file = await asyncio.to_thread(self._write_temp_json, payload)
+        remote_file = f"/tmp/tgvpn-adu-{os.getpid()}-{Path(config_file).name}"
+        try:
+            upload_code, upload_stdout, upload_stderr = await self._scp_to_remote(config_file, remote_file)
+            if upload_code != 0:
+                return upload_code, upload_stdout, upload_stderr
+            return await self._run_remote_args_command(self._api_command("adu") + [remote_file])
+        finally:
+            await self._run_remote_shell_command(f"rm -f {shlex.quote(remote_file)}")
+            await asyncio.to_thread(self._safe_unlink, config_file)
+
+    async def _run_remote_shell_command(self, command: str) -> tuple[int, str, str]:
+        return await self._run_process_args(self._ssh_command(command), env=self._ssh_env())
+
+    async def _scp_to_remote(self, local_path: str, remote_path: str) -> tuple[int, str, str]:
+        args = self._sshpass_prefix()
+        args.extend(
+            [
+                "scp",
+                "-P",
+                str(self.settings.xray_remote_port),
+                "-o",
+                "StrictHostKeyChecking=accept-new",
+            ]
+        )
+        if self.settings.xray_remote_key_path:
+            args.extend(["-i", self.settings.xray_remote_key_path])
+        args.extend(
+            [
+                local_path,
+                f"{self.settings.xray_remote_user}@{self.settings.xray_remote_host}:{remote_path}",
+            ]
+        )
+        return await self._run_process_args(args, env=self._ssh_env())
+
+    def _ssh_command(self, command: str) -> list[str]:
+        if not self.settings.xray_remote_host:
+            raise RuntimeError("XRAY_REMOTE_HOST is required for ssh_api mode")
+
+        args = self._sshpass_prefix()
+        args.extend(
+            [
+                "ssh",
+                "-p",
+                str(self.settings.xray_remote_port),
+                "-o",
+                "StrictHostKeyChecking=accept-new",
+            ]
+        )
+        if self.settings.xray_remote_key_path:
+            args.extend(["-i", self.settings.xray_remote_key_path])
+        args.extend([f"{self.settings.xray_remote_user}@{self.settings.xray_remote_host}", command])
+        return args
+
+    def _sshpass_prefix(self) -> list[str]:
+        return ["sshpass", "-e"] if self.settings.xray_remote_password else []
+
+    def _ssh_env(self) -> dict[str, str]:
+        env = os.environ.copy()
+        if self.settings.xray_remote_password:
+            env["SSHPASS"] = self.settings.xray_remote_password
+        return env
+
+    @staticmethod
+    async def _run_process_args(args: list[str], *, env: dict[str, str] | None = None) -> tuple[int, str, str]:
+        process = await asyncio.create_subprocess_exec(
+            *args,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+            env=env,
         )
         stdout, stderr = await process.communicate()
         return (

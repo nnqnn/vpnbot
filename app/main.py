@@ -19,6 +19,7 @@ from app.services.billing_service import BillingService
 from app.services.device_limit_service import DeviceLimitService
 from app.services.payment_service import TelegaPayService
 from app.services.scheduler_service import SchedulerService
+from app.services.subscription_sync_service import SubscriptionSnapshotService
 from app.services.user_service import UserService
 from app.services.xray_service import XrayService
 from app.utils.time import utc_now
@@ -66,9 +67,15 @@ async def main() -> None:
     payment_service = TelegaPayService(settings, session_maker)
     admin_service = AdminService(xray_service)
     device_limit_service = DeviceLimitService(settings, session_maker, xray_service)
+    subscription_snapshot_service = SubscriptionSnapshotService(settings, session_maker)
 
     await _sync_xray_state(session_maker, xray_service)
     await billing_service.reconcile_states()
+    if settings.subscription_snapshot_sync_interval_minutes > 0:
+        try:
+            await subscription_snapshot_service.sync_once()
+        except Exception:
+            logger.exception("Initial subscription snapshot sync failed")
 
     scheduler = SchedulerService(
         settings=settings,
@@ -76,6 +83,7 @@ async def main() -> None:
         billing_service=billing_service,
         payment_service=payment_service,
         device_limit_service=device_limit_service,
+        subscription_snapshot_service=subscription_snapshot_service,
     )
     scheduler.start()
 
@@ -89,6 +97,7 @@ async def main() -> None:
             payment_service=payment_service,
             xray_service=xray_service,
             admin_service=admin_service,
+            subscription_snapshot_service=subscription_snapshot_service,
         )
     finally:
         await scheduler.shutdown()
