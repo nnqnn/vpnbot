@@ -15,6 +15,7 @@ from app.services.subscription_builder import (
     build_happ_redirect_url,
     build_subscription_response,
     build_subscription_url,
+    build_xray_json_subscription_response,
 )
 from app.services.subscription_sync_service import build_snapshot_payload
 from app.services.xray_service import XrayService
@@ -125,6 +126,114 @@ def test_subscription_response_returns_none_for_invalid_token() -> None:
     response = build_subscription_response(snapshot={"users": {}}, product="kVPN", token="bad", profile=_profile())
 
     assert response is None
+
+
+def test_xray_json_response_uses_worker_profile_for_whitelist_only_user() -> None:
+    snapshot = {
+        "users": {
+            "tok": {
+                "telegram_id": 123,
+                "uuid": "00000000-0000-0000-0000-000000000001",
+                "main_vpn_active": False,
+                "whitelist_enabled": True,
+                "expire": 0,
+            }
+        }
+    }
+    worker_profile = {
+        "outbounds": [
+            {"tag": "auto-001", "protocol": "vless"},
+            {"tag": "direct", "protocol": "freedom"},
+            {"tag": "block", "protocol": "blackhole"},
+        ],
+        "routing": {
+            "rules": [{"network": "tcp,udp", "balancerTag": "auto"}],
+            "balancers": [{"tag": "auto", "selector": ["auto-"], "strategy": {"type": "leastPing"}}],
+        },
+        "remarks": "worker profile",
+    }
+
+    response = build_xray_json_subscription_response(
+        snapshot=snapshot,
+        product="kVPN",
+        token="tok",
+        profile=_profile(),
+        whitelist_profile=worker_profile,
+    )
+
+    assert response is not None
+    config = json.loads(response.body)
+    assert response.headers["content-type"] == "application/json; charset=utf-8"
+    assert response.headers["subscription-userinfo"].endswith("expire=0")
+    assert [outbound["tag"] for outbound in config["outbounds"]] == ["auto-001", "direct", "block"]
+    assert "vless://wl-1" not in response.body
+
+
+def test_xray_json_response_merges_main_outbound_into_worker_balancer_for_full_access() -> None:
+    snapshot = {
+        "users": {
+            "tok": {
+                "telegram_id": 123,
+                "uuid": "00000000-0000-0000-0000-000000000001",
+                "main_vpn_active": True,
+                "whitelist_enabled": True,
+                "expire": 1781259930,
+            }
+        }
+    }
+    worker_profile = {
+        "outbounds": [
+            {"tag": "auto-001", "protocol": "vless"},
+            {"tag": "direct", "protocol": "freedom"},
+            {"tag": "block", "protocol": "blackhole"},
+        ],
+        "routing": {
+            "rules": [{"network": "tcp,udp", "balancerTag": "auto"}],
+            "balancers": [{"tag": "auto", "selector": ["auto-"], "strategy": {"type": "leastPing"}}],
+        },
+    }
+
+    response = build_xray_json_subscription_response(
+        snapshot=snapshot,
+        product="kVPN",
+        token="tok",
+        profile=_profile(),
+        whitelist_profile=worker_profile,
+    )
+
+    assert response is not None
+    config = json.loads(response.body)
+    assert config["outbounds"][0]["tag"] == "auto-main"
+    assert config["outbounds"][0]["settings"]["vnext"][0]["address"] == "s2.nnqnn.tech"
+    assert config["routing"]["balancers"][0]["selector"] == ["auto-"]
+    assert response.headers["subscription-userinfo"].endswith("expire=1781259930")
+
+
+def test_xray_json_response_builds_main_only_profile_without_whitelist_fetch() -> None:
+    snapshot = {
+        "users": {
+            "tok": {
+                "telegram_id": 123,
+                "uuid": "00000000-0000-0000-0000-000000000001",
+                "main_vpn_active": True,
+                "whitelist_enabled": False,
+                "expire": 1781259930,
+            }
+        }
+    }
+
+    response = build_xray_json_subscription_response(
+        snapshot=snapshot,
+        product="kVPN",
+        token="tok",
+        profile=_profile(),
+        whitelist_profile=None,
+    )
+
+    assert response is not None
+    config = json.loads(response.body)
+    assert [outbound["tag"] for outbound in config["outbounds"]] == ["proxy", "direct", "block"]
+    assert config["routing"]["rules"][-1] == {"network": "tcp,udp", "outboundTag": "proxy"}
 
 
 def test_subscription_links() -> None:

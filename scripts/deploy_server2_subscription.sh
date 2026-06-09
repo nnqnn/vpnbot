@@ -13,6 +13,7 @@ DIRECT_PORT="${SUBSCRIPTION_DIRECT_PORT:-9443}"
 SUBSCRIPTION_PORT="${SUBSCRIPTION_LISTEN_PORT:-8088}"
 LETSENCRYPT_EMAIL="${LETSENCRYPT_EMAIL:-}"
 ORIGIN_SECRET="${SUBSCRIPTION_ORIGIN_SECRET:-}"
+REQUIRE_ORIGIN_SECRET="${SUBSCRIPTION_REQUIRE_ORIGIN_SECRET:-false}"
 PUBLIC_KEY="${SUBSCRIPTION_SERVER2_VLESS_PBK:-}"
 ARCHIVE="/tmp/tgvpn-server2-subscription.tar.gz"
 
@@ -61,6 +62,7 @@ require_cmd tar
 
 load_optional_env TGVPN_SERVER2_PASSWORD
 load_optional_env SUBSCRIPTION_ORIGIN_SECRET
+load_optional_env SUBSCRIPTION_REQUIRE_ORIGIN_SECRET
 load_optional_env SUBSCRIPTION_SERVER2_VLESS_PBK
 load_optional_env SUBSCRIPTION_SERVER2_HOST
 load_optional_env SUBSCRIPTION_SERVER2_USER
@@ -76,13 +78,14 @@ DIRECT_HOST="${SUBSCRIPTION_DIRECT_HOST:-$DIRECT_HOST}"
 DIRECT_PORT="${SUBSCRIPTION_DIRECT_PORT:-$DIRECT_PORT}"
 LETSENCRYPT_EMAIL="${LETSENCRYPT_EMAIL:-$LETSENCRYPT_EMAIL}"
 ORIGIN_SECRET="${SUBSCRIPTION_ORIGIN_SECRET:-$ORIGIN_SECRET}"
+REQUIRE_ORIGIN_SECRET="${SUBSCRIPTION_REQUIRE_ORIGIN_SECRET:-$REQUIRE_ORIGIN_SECRET}"
 PUBLIC_KEY="${SUBSCRIPTION_SERVER2_VLESS_PBK:-$PUBLIC_KEY}"
 
 if [[ -z "${TGVPN_SERVER2_PASSWORD:-}" ]]; then
   echo "TGVPN_SERVER2_PASSWORD is required in environment or .env" >&2
   exit 1
 fi
-if [[ -z "$ORIGIN_SECRET" ]]; then
+if [[ "$REQUIRE_ORIGIN_SECRET" == "true" && -z "$ORIGIN_SECRET" ]]; then
   ORIGIN_SECRET="$(python3 - <<'PY'
 import secrets
 print(secrets.token_urlsafe(32))
@@ -143,8 +146,9 @@ SUBSCRIPTION_LISTEN_HOST=127.0.0.1
 SUBSCRIPTION_LISTEN_PORT=\$subscription_port
 SUBSCRIPTION_SNAPSHOT_PATH=/var/lib/tgvpn/subscription_snapshot.json
 SUBSCRIPTION_ORIGIN_SECRET=\$origin_secret
+SUBSCRIPTION_RESPONSE_FORMAT=xray_json
 SUBSCRIPTION_PRODUCT=kVPN
-SUBSCRIPTION_PUBLIC_BASE_URL=https://vpn.nnqnn.tech
+SUBSCRIPTION_PUBLIC_BASE_URL=https://\$direct_host
 SUBSCRIPTION_PROFILE_TITLE=kVPN @kkVPNrobot
 SUBSCRIPTION_UPDATE_INTERVAL_HOURS=1
 SUBSCRIPTION_TRAFFIC_TOTAL_BYTES=0
@@ -163,13 +167,18 @@ VLESS_PATH=
 VLESS_HEADER_TYPE=
 VLESS_REMARK_PREFIX=kVPN
 SUPPORT_URL=https://t.me/kvpn_support
+WHITELIST_PROFILE_URL=https://vpn.nnqnn.tech/
 WHITELIST_SOURCE_URL=https://raw.githubusercontent.com/zieng2/wl/main/vless_universal.txt
 WHITELIST_MAX_NODES=300
 WHITELIST_CACHE_SECONDS=300
 ENV
 chmod 600 "\$server_dir/.env.subscription"
-printf '%s\n' "\$origin_secret" > /root/tgvpn-origin-secret.txt
-chmod 600 /root/tgvpn-origin-secret.txt
+if [[ -n "\$origin_secret" ]]; then
+  printf '%s\n' "\$origin_secret" > /root/tgvpn-origin-secret.txt
+  chmod 600 /root/tgvpn-origin-secret.txt
+else
+  rm -f /root/tgvpn-origin-secret.txt
+fi
 
 if [[ ! -f /var/lib/tgvpn/subscription_snapshot.json ]]; then
   printf '{"version":1,"product":"kVPN","generated_at":"bootstrap","users":{}}' \
@@ -185,7 +194,11 @@ systemctl is-active --quiet tgvpn-subscription.service
 curl -fsS "http://127.0.0.1:\$subscription_port/healthz" >/dev/null
 
 echo "server2 subscription deployed"
-echo "origin secret saved at /root/tgvpn-origin-secret.txt"
+if [[ -n "\$origin_secret" ]]; then
+  echo "origin secret saved at /root/tgvpn-origin-secret.txt"
+else
+  echo "origin secret disabled for direct s2 subscription endpoint"
+fi
 REMOTE_SCRIPT
 
 log "Restarting and checking Xray on server2"

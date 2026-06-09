@@ -15,6 +15,9 @@ from dotenv import load_dotenv
 from app.services.subscription_builder import (
     SubscriptionProfile,
     build_subscription_response,
+    build_happ_link,
+    build_subscription_url,
+    build_xray_json_subscription_response,
 )
 
 logger = logging.getLogger(__name__)
@@ -27,10 +30,12 @@ class RuntimeConfig:
         self.listen_port = int(_env("SUBSCRIPTION_LISTEN_PORT", "8088"))
         self.snapshot_path = Path(_env("SUBSCRIPTION_SNAPSHOT_PATH", "/var/lib/tgvpn/subscription_snapshot.json"))
         self.origin_secret = _env("SUBSCRIPTION_ORIGIN_SECRET", "")
+        self.response_format = _env("SUBSCRIPTION_RESPONSE_FORMAT", "xray_json").strip().lower()
         self.whitelist_source_url = _env(
             "WHITELIST_SOURCE_URL",
             "https://raw.githubusercontent.com/zieng2/wl/main/vless_universal.txt",
         )
+        self.whitelist_profile_url = _env("WHITELIST_PROFILE_URL", "https://vpn.nnqnn.tech/")
         self.whitelist_cache_seconds = int(_env("WHITELIST_CACHE_SECONDS", "300"))
         self.profile = SubscriptionProfile(
             product=_env("SUBSCRIPTION_PRODUCT", "kVPN"),
@@ -61,7 +66,9 @@ class SubscriptionState:
     def __init__(self, config: RuntimeConfig) -> None:
         self.config = config
         self._whitelist_text = ""
-        self._whitelist_loaded_at = 0.0
+        self._whitelist_profile: dict | None = None
+        self._whitelist_text_loaded_at = 0.0
+        self._whitelist_profile_loaded_at = 0.0
 
     def load_snapshot(self) -> dict:
         try:
@@ -75,7 +82,7 @@ class SubscriptionState:
 
     def whitelist_text(self) -> str:
         now = time.monotonic()
-        if self._whitelist_text and now - self._whitelist_loaded_at < self.config.whitelist_cache_seconds:
+        if self._whitelist_text and now - self._whitelist_text_loaded_at < self.config.whitelist_cache_seconds:
             return self._whitelist_text
 
         try:
@@ -92,8 +99,33 @@ class SubscriptionState:
             return ""
 
         self._whitelist_text = response.text
-        self._whitelist_loaded_at = now
+        self._whitelist_text_loaded_at = now
         return self._whitelist_text
+
+    def whitelist_profile(self) -> dict | None:
+        now = time.monotonic()
+        if self._whitelist_profile is not None and now - self._whitelist_profile_loaded_at < self.config.whitelist_cache_seconds:
+            return self._whitelist_profile
+
+        try:
+            response = httpx.get(
+                self.config.whitelist_profile_url,
+                headers={"User-Agent": "tgvpn-subscription-server"},
+                timeout=10,
+            )
+            response.raise_for_status()
+            payload = response.json()
+        except Exception:
+            logger.exception("Cannot fetch whitelist profile")
+            return self._whitelist_profile
+
+        if not isinstance(payload, dict):
+            logger.warning("Whitelist profile is not a JSON object")
+            return self._whitelist_profile
+
+        self._whitelist_profile = payload
+        self._whitelist_profile_loaded_at = now
+        return self._whitelist_profile
 
 
 class SubscriptionHandler(BaseHTTPRequestHandler):
@@ -104,14 +136,18 @@ class SubscriptionHandler(BaseHTTPRequestHandler):
             self._send_text(HTTPStatus.OK, "ok")
             return
 
+        path = urlsplit(self.path).path
+        parts = [unquote(part) for part in path.split("/") if part]
+        if len(parts) == 3 and parts[0] == "add":
+            self._send_happ_redirect(parts[1], parts[2])
+            return
+
         if self.server.state.config.origin_secret:
             provided = self.headers.get("x-tgvpn-origin-secret", "")
             if provided != self.server.state.config.origin_secret:
                 self._send_text(HTTPStatus.NOT_FOUND, "not found")
                 return
 
-        path = urlsplit(self.path).path
-        parts = [unquote(part) for part in path.split("/") if part]
         if len(parts) != 3 or parts[0] != "sub":
             self._send_text(HTTPStatus.NOT_FOUND, "not found")
             return
@@ -123,13 +159,22 @@ class SubscriptionHandler(BaseHTTPRequestHandler):
             self._send_text(HTTPStatus.NOT_FOUND, "not found")
             return
 
-        response = build_subscription_response(
-            snapshot=snapshot,
-            product=product,
-            token=token,
-            profile=self.server.state.config.profile,
-            whitelist_source_text=self.server.state.whitelist_text() if raw_user.get("whitelist_enabled") else "",
-        )
+        if self.server.state.config.response_format == "base64_links":
+            response = build_subscription_response(
+                snapshot=snapshot,
+                product=product,
+                token=token,
+                profile=self.server.state.config.profile,
+                whitelist_source_text=self.server.state.whitelist_text() if raw_user.get("whitelist_enabled") else "",
+            )
+        else:
+            response = build_xray_json_subscription_response(
+                snapshot=snapshot,
+                product=product,
+                token=token,
+                profile=self.server.state.config.profile,
+                whitelist_profile=self.server.state.whitelist_profile() if raw_user.get("whitelist_enabled") else None,
+            )
         if response is None:
             self._send_text(HTTPStatus.NOT_FOUND, "not found")
             return
@@ -150,6 +195,23 @@ class SubscriptionHandler(BaseHTTPRequestHandler):
         self.send_header("cache-control", "no-store")
         self.end_headers()
         self.wfile.write(text.encode("utf-8"))
+
+    def _send_happ_redirect(self, product: str, token: str) -> None:
+        https_url = build_subscription_url(self.server.state.config.profile.public_base_url, product, token)
+        happ_url = build_happ_link(https_url)
+        html = (
+            '<!doctype html><html><head><meta charset="utf-8">'
+            '<meta name="viewport" content="width=device-width,initial-scale=1">'
+            f'<meta http-equiv="refresh" content="0; url={_escape_html(happ_url)}">'
+            "<title>Open Happ</title></head><body>"
+            f'<a href="{_escape_html(happ_url)}">Open Happ</a>'
+            "</body></html>"
+        )
+        self.send_response(HTTPStatus.OK)
+        self.send_header("content-type", "text/html; charset=utf-8")
+        self.send_header("cache-control", "no-store")
+        self.end_headers()
+        self.wfile.write(html.encode("utf-8"))
 
     @staticmethod
     def _redact_tokens(message: str) -> str:
@@ -185,6 +247,15 @@ def main() -> None:
 
 def _env(key: str, default: str) -> str:
     return os.environ.get(key, default)
+
+
+def _escape_html(value: str) -> str:
+    return (
+        value.replace("&", "&amp;")
+        .replace('"', "&quot;")
+        .replace("<", "&lt;")
+        .replace(">", "&gt;")
+    )
 
 
 if __name__ == "__main__":

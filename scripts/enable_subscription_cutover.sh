@@ -7,7 +7,7 @@ SERVER_USER="${SERVER_USER:-root}"
 SERVER_DIR="${SERVER_DIR:-/home/tgvpn}"
 DIRECT_HOST="${SUBSCRIPTION_DIRECT_HOST:-s2.nnqnn.tech}"
 DIRECT_IP="${SUBSCRIPTION_SERVER2_HOST:-89.125.50.96}"
-PUBLIC_BASE_URL="${SUBSCRIPTION_PUBLIC_BASE_URL:-https://vpn.nnqnn.tech}"
+PUBLIC_BASE_URL="${SUBSCRIPTION_PUBLIC_BASE_URL:-https://s2.nnqnn.tech}"
 PRODUCT="${SUBSCRIPTION_PRODUCT:-kVPN}"
 SERVICE="${SERVICE:-tgvpn-bot.service}"
 
@@ -64,7 +64,7 @@ if [[ "$dns_ips" != *"$DIRECT_IP"* ]]; then
   exit 1
 fi
 
-log "Verifying public Worker subscription before enabling bot links"
+log "Verifying public subscription before enabling bot links"
 SSHPASS="$TGVPN_SERVER_PASSWORD" sshpass -e ssh \
   -o StrictHostKeyChecking=accept-new \
   "${SERVER_USER}@${SERVER_HOST}" \
@@ -108,38 +108,58 @@ grep -aiq '^cache-control: no-store' "$tmp_headers"
 grep -aiq '^profile-title:' "$tmp_headers"
 grep -aiq '^profile-update-interval:' "$tmp_headers"
 grep -aiq '^subscription-userinfo:' "$tmp_headers"
-grep -aiq '^routing:' "$tmp_headers"
 
 ".venv/bin/python" - "$tmp_body" <<'PY'
 import base64
+import json
 import sys
 from pathlib import Path
 
 body = Path(sys.argv[1]).read_bytes()
-decoded = base64.b64decode(body).decode("utf-8")
-nodes = [line for line in decoded.splitlines() if line.strip()]
-if not nodes:
-    raise SystemExit("subscription body has no nodes")
-if not all(line.startswith(("vless://", "vmess://", "trojan://", "ss://", "socks://")) for line in nodes):
-    raise SystemExit("subscription body contains unsupported node lines")
+try:
+    payload = json.loads(body.decode("utf-8"))
+except json.JSONDecodeError:
+    decoded = base64.b64decode(body).decode("utf-8")
+    nodes = [line for line in decoded.splitlines() if line.strip()]
+    if not nodes:
+        raise SystemExit("subscription body has no nodes")
+    if not all(line.startswith(("vless://", "vmess://", "trojan://", "ss://", "socks://")) for line in nodes):
+        raise SystemExit("subscription body contains unsupported node lines")
+else:
+    if not isinstance(payload, dict):
+        raise SystemExit("JSON subscription body is not an object")
+    outbounds = payload.get("outbounds")
+    routing = payload.get("routing")
+    if not isinstance(outbounds, list) or not outbounds:
+        raise SystemExit("JSON subscription has no outbounds")
+    if not isinstance(routing, dict):
+        raise SystemExit("JSON subscription has no routing object")
 PY
 
-".venv/bin/python" - <<'PY'
+curl -fsS --compressed "${public_base_url%/}/add/${product}/${token}" >/dev/null
+
+PUBLIC_BASE_URL="$public_base_url" ".venv/bin/python" - <<'PY'
+import os
 from pathlib import Path
 
 path = Path(".env")
-key = "SUBSCRIPTION_LINKS_ENABLED"
+updates = {
+    "SUBSCRIPTION_LINKS_ENABLED": "true",
+    "SUBSCRIPTION_PUBLIC_BASE_URL": os.environ["PUBLIC_BASE_URL"],
+}
 lines = path.read_text(encoding="utf-8").splitlines()
-updated = False
+seen = set()
 out = []
 for line in lines:
-    if line.startswith(f"{key}="):
-        out.append(f"{key}=true")
-        updated = True
+    key = line.split("=", 1)[0] if "=" in line else ""
+    if key in updates:
+        out.append(f"{key}={updates[key]}")
+        seen.add(key)
     else:
         out.append(line)
-if not updated:
-    out.append(f"{key}=true")
+for key, value in updates.items():
+    if key not in seen:
+        out.append(f"{key}={value}")
 path.write_text("\n".join(out) + "\n", encoding="utf-8")
 PY
 

@@ -91,6 +91,8 @@ class Settings(BaseSettings):
         alias="SUBSCRIPTION_SNAPSHOT_SYNC_INTERVAL_MINUTES",
     )
     subscription_origin_secret: str = Field(default="", alias="SUBSCRIPTION_ORIGIN_SECRET")
+    subscription_response_format: str = Field(default="xray_json", alias="SUBSCRIPTION_RESPONSE_FORMAT")
+    whitelist_profile_url: str = Field(default="https://vpn.nnqnn.tech/", alias="WHITELIST_PROFILE_URL")
     whitelist_source_url: str = Field(
         default="https://raw.githubusercontent.com/zieng2/wl/main/vless_universal.txt",
         alias="WHITELIST_SOURCE_URL",
