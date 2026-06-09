@@ -141,7 +141,8 @@ class SubscriptionHandler(BaseHTTPRequestHandler):
         self.wfile.write(response.body.encode("utf-8"))
 
     def log_message(self, format: str, *args) -> None:  # noqa: A002
-        logger.info("%s - %s", self.address_string(), format % args)
+        message = format % args
+        logger.info("%s - %s", self.address_string(), self._redact_tokens(message))
 
     def _send_text(self, status: HTTPStatus, text: str) -> None:
         self.send_response(status)
@@ -149,6 +150,19 @@ class SubscriptionHandler(BaseHTTPRequestHandler):
         self.send_header("cache-control", "no-store")
         self.end_headers()
         self.wfile.write(text.encode("utf-8"))
+
+    @staticmethod
+    def _redact_tokens(message: str) -> str:
+        parts = message.split(" ")
+        redacted: list[str] = []
+        for part in parts:
+            if part.startswith("/sub/") or part.startswith("/add/"):
+                bits = part.split("/")
+                if len(bits) >= 4:
+                    bits[3] = "***"
+                    part = "/".join(bits)
+            redacted.append(part)
+        return " ".join(redacted)
 
 
 class SubscriptionHTTPServer(ThreadingHTTPServer):

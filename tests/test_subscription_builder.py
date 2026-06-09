@@ -8,6 +8,7 @@ from types import SimpleNamespace
 from app.db.models import UserStatus
 from app.db.repositories import SubscriptionTokenRepository
 from app.bot.handlers.user import _build_raw_vless_access_text, _build_vpn_access_text
+from app.subscription_server import SubscriptionHandler
 from app.services.subscription_builder import (
     SubscriptionProfile,
     build_happ_link,
@@ -163,6 +164,12 @@ def test_bot_raw_vless_access_text_keeps_legacy_key_format() -> None:
 
     assert f"<code>{link}</code>" in text
     assert "Ваш VPN-ключ" in text
+
+
+def test_subscription_server_log_message_redacts_tokens() -> None:
+    message = 'GET /sub/kVPN/secret-token-value?x=1 HTTP/1.1'
+
+    assert SubscriptionHandler._redact_tokens(message) == 'GET /sub/kVPN/*** HTTP/1.1'
 
 
 def test_snapshot_payload_marks_main_and_whitelist_entitlements() -> None:
