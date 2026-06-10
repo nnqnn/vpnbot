@@ -18,6 +18,7 @@ class SubscriptionProfile:
     support_url: str
     announce_url: str
     announce_text: str
+    profile_web_page_url: str
     vless_public_host: str
     vless_public_port: int
     vless_security: str
@@ -32,6 +33,8 @@ class SubscriptionProfile:
     vless_header_type: str
     vless_remark_prefix: str
     whitelist_max_nodes: int
+    main_bridge_enabled: bool = False
+    main_bridge_max_nodes: int = 8
     fallback_vless_public_host: str = ""
     fallback_vless_public_port: int = 443
     fallback_vless_security: str = "reality"
@@ -113,6 +116,7 @@ def build_subscription_response(
 
     nodes_text = "\n".join(nodes)
     https_url = build_subscription_url(profile.public_base_url, profile.product, token)
+    profile_web_page_url = profile.profile_web_page_url or https_url
     headers = {
         "content-type": "text/plain; charset=utf-8",
         "cache-control": "no-store",
@@ -123,7 +127,7 @@ def build_subscription_response(
         "announce": f"base64:{b64_text(_build_announce(profile.announce_text, user))}",
         "subscription-userinfo": _build_userinfo(user, profile),
         "announce-url": profile.announce_url,
-        "profile-web-page-url": https_url,
+        "profile-web-page-url": profile_web_page_url,
         "routing": b64_text(json.dumps(build_default_routing(), ensure_ascii=False, separators=(",", ":"))),
     }
     return SubscriptionResponse(body=b64_text(nodes_text), headers=headers, nodes=nodes)
@@ -147,6 +151,7 @@ def build_xray_json_subscription_response(
     user = snapshot_user_from_payload(raw_user)
     configs = build_xray_json_profiles(user, profile, whitelist_profile=whitelist_profile)
     https_url = build_subscription_url(profile.public_base_url, profile.product, token)
+    profile_web_page_url = profile.profile_web_page_url or https_url
     headers = {
         "content-type": "application/json; charset=utf-8",
         "cache-control": "no-store",
@@ -158,7 +163,7 @@ def build_xray_json_subscription_response(
         "announce": f"base64:{b64_text(_build_announce(profile.announce_text, user))}",
         "subscription-userinfo": _build_userinfo(user, profile),
         "announce-url": profile.announce_url,
-        "profile-web-page-url": https_url,
+        "profile-web-page-url": profile_web_page_url,
     }
     body = json.dumps(configs, ensure_ascii=False, separators=(",", ":"))
     return SubscriptionResponse(body=body, headers=headers, nodes=_profile_remarks(configs))
@@ -172,7 +177,7 @@ def build_xray_json_profiles(
 ) -> list[dict[str, Any]]:
     configs: list[dict[str, Any]] = []
     if user.main_vpn_active:
-        configs.append(_build_single_main_config(user, profile))
+        configs.append(_build_single_main_config(user, profile, bridge_profile=whitelist_profile))
     if user.whitelist_enabled and isinstance(whitelist_profile, dict):
         configs.append(_normalize_whitelist_profile(whitelist_profile, profile))
     return configs
@@ -185,7 +190,7 @@ def build_xray_json_config(
     whitelist_profile: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     if user.main_vpn_active:
-        return _build_single_main_config(user, profile)
+        return _build_single_main_config(user, profile, bridge_profile=whitelist_profile)
     if user.whitelist_enabled and isinstance(whitelist_profile, dict):
         return _normalize_whitelist_profile(whitelist_profile, profile)
     return _build_blocked_config(profile)
@@ -258,6 +263,47 @@ def build_fallback_xray_outbound(
         path=profile.fallback_vless_path,
         xhttp_mode=profile.fallback_vless_xhttp_mode,
     )
+
+
+def _build_chained_main_outbound(
+    user: SnapshotUser,
+    profile: SubscriptionProfile,
+    *,
+    tag: str,
+    bridge_tag: str,
+) -> dict[str, Any]:
+    outbound = build_main_xray_outbound(user, profile, tag=tag)
+    outbound["proxySettings"] = {
+        "tag": bridge_tag,
+        "transportLayer": True,
+    }
+    return outbound
+
+
+def _build_bridge_outbounds(bridge_profile: dict[str, Any] | None, *, max_nodes: int) -> list[dict[str, Any]]:
+    if max_nodes <= 0 or not isinstance(bridge_profile, dict):
+        return []
+
+    raw_outbounds = bridge_profile.get("outbounds")
+    if not isinstance(raw_outbounds, list):
+        return []
+
+    bridge_outbounds: list[dict[str, Any]] = []
+    for outbound in raw_outbounds:
+        if not isinstance(outbound, dict):
+            continue
+        if outbound.get("protocol") in {"freedom", "blackhole", "dns"}:
+            continue
+        if not isinstance(outbound.get("settings"), dict):
+            continue
+
+        copied = deepcopy(outbound)
+        copied["tag"] = f"bridge-{len(bridge_outbounds) + 1:03d}"
+        copied.pop("proxySettings", None)
+        bridge_outbounds.append(copied)
+        if len(bridge_outbounds) >= max_nodes:
+            break
+    return bridge_outbounds
 
 
 def _build_vless_xray_outbound(
@@ -374,12 +420,23 @@ def _build_base_client_config(profile: SubscriptionProfile) -> dict[str, Any]:
     }
 
 
-def _build_single_main_config(user: SnapshotUser, profile: SubscriptionProfile) -> dict[str, Any]:
+def _build_single_main_config(
+    user: SnapshotUser,
+    profile: SubscriptionProfile,
+    *,
+    bridge_profile: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     config = _build_base_client_config(profile)
     config["remarks"] = f"{profile.profile_title} - Основной VPN"
     primary_outbound = build_main_xray_outbound(user, profile, tag="proxy")
     fallback_outbound = build_fallback_xray_outbound(user, profile, tag="proxy-direct")
-    if fallback_outbound is None:
+    bridge_outbounds = _build_bridge_outbounds(bridge_profile, max_nodes=profile.main_bridge_max_nodes) if profile.main_bridge_enabled else []
+    chained_outbounds = [
+        _build_chained_main_outbound(user, profile, tag=f"proxy-bridge-{index:03d}", bridge_tag=str(bridge["tag"]))
+        for index, bridge in enumerate(bridge_outbounds, start=1)
+    ]
+
+    if fallback_outbound is None and not chained_outbounds:
         config["outbounds"] = [
             primary_outbound,
             {"tag": "direct", "protocol": "freedom"},
@@ -389,23 +446,31 @@ def _build_single_main_config(user: SnapshotUser, profile: SubscriptionProfile) 
         balancers: list[dict[str, Any]] = []
     else:
         primary_outbound["tag"] = "proxy-cdn"
+        proxy_selectors = ["proxy-cdn"]
         config["outbounds"] = [
             primary_outbound,
-            fallback_outbound,
+        ]
+        if fallback_outbound is not None:
+            config["outbounds"].append(fallback_outbound)
+            proxy_selectors.append("proxy-direct")
+        config["outbounds"].extend(chained_outbounds)
+        proxy_selectors.extend(str(outbound["tag"]) for outbound in chained_outbounds)
+        config["outbounds"].extend(bridge_outbounds)
+        config["outbounds"].extend([
             {"tag": "direct", "protocol": "freedom"},
             {"tag": "block", "protocol": "blackhole"},
-        ]
+        ])
         final_rule = {"network": "tcp,udp", "balancerTag": "proxy-auto"}
         balancers = [
             {
                 "tag": "proxy-auto",
-                "selector": ["proxy-cdn", "proxy-direct"],
+                "selector": proxy_selectors,
                 "fallbackTag": "proxy-cdn",
                 "strategy": {"type": "leastPing"},
             }
         ]
         config["observatory"] = {
-            "subjectSelector": ["proxy-cdn", "proxy-direct"],
+            "subjectSelector": proxy_selectors,
             "probeUrl": "https://www.gstatic.com/generate_204",
             "probeInterval": "1m",
             "enableConcurrency": True,

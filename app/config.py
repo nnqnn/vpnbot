@@ -85,6 +85,7 @@ class Settings(BaseSettings):
         alias="SUBSCRIPTION_ANNOUNCE_TEXT",
     )
     subscription_announce_url: str = Field(default="https://t.me/kvpn_public", alias="SUBSCRIPTION_ANNOUNCE_URL")
+    subscription_profile_web_page_url: str = Field(default="", alias="SUBSCRIPTION_PROFILE_WEB_PAGE_URL")
     subscription_snapshot_path: Path = Field(
         default=Path("./logs/subscription_snapshot.json"),
         alias="SUBSCRIPTION_SNAPSHOT_PATH",

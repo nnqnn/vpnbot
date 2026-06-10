@@ -45,6 +45,7 @@ def _profile() -> SubscriptionProfile:
         support_url="https://t.me/support",
         announce_url="https://t.me/news",
         announce_text="kVPN auto update",
+        profile_web_page_url="",
         vless_public_host="s2.nnqnn.tech",
         vless_public_port=9443,
         vless_security="reality",
@@ -429,6 +430,103 @@ def test_xray_json_main_profile_can_use_xhttp_tls_as_primary() -> None:
         "mode": "packet-up",
     }
     assert primary["streamSettings"]["tlsSettings"]["serverName"] == "s2.nnqnn.tech"
+
+
+def test_xray_json_main_profile_can_chain_server2_through_bridge_nodes() -> None:
+    snapshot = {
+        "users": {
+            "tok": {
+                "telegram_id": 123,
+                "uuid": "00000000-0000-0000-0000-000000000001",
+                "main_vpn_active": True,
+                "whitelist_enabled": False,
+                "expire": 1781259930,
+            }
+        }
+    }
+    profile = replace(
+        _profile(),
+        vless_public_host="s2.nnqnn.tech",
+        vless_public_port=443,
+        vless_security="tls",
+        vless_type="xhttp",
+        vless_sni="s2.nnqnn.tech",
+        vless_flow="",
+        vless_pbk="",
+        vless_sid="",
+        vless_path="/kvpn-xhttp",
+        vless_xhttp_mode="packet-up",
+        main_bridge_enabled=True,
+        main_bridge_max_nodes=2,
+    )
+    bridge_profile = {
+        "outbounds": [
+            {
+                "tag": "auto-001",
+                "protocol": "vless",
+                "settings": {"vnext": [{"address": "bridge1.example", "port": 443, "users": []}]},
+                "streamSettings": {"network": "tcp", "security": "reality"},
+            },
+            {"tag": "direct", "protocol": "freedom"},
+            {
+                "tag": "auto-002",
+                "protocol": "vless",
+                "settings": {"vnext": [{"address": "bridge2.example", "port": 443, "users": []}]},
+                "streamSettings": {"network": "tcp", "security": "reality"},
+            },
+        ]
+    }
+
+    response = build_xray_json_subscription_response(
+        snapshot=snapshot,
+        product="kVPN",
+        token="tok",
+        profile=profile,
+        whitelist_profile=bridge_profile,
+    )
+
+    assert response is not None
+    config = json.loads(response.body)[0]
+    tags = [outbound["tag"] for outbound in config["outbounds"]]
+    assert "proxy-cdn" in tags
+    assert "proxy-bridge-001" in tags
+    assert "proxy-bridge-002" in tags
+    assert "bridge-001" in tags
+    assert "bridge-002" in tags
+    chained = next(outbound for outbound in config["outbounds"] if outbound["tag"] == "proxy-bridge-001")
+    assert chained["settings"]["vnext"][0]["address"] == "s2.nnqnn.tech"
+    assert chained["proxySettings"] == {"tag": "bridge-001", "transportLayer": True}
+    assert config["routing"]["balancers"][0]["selector"] == [
+        "proxy-cdn",
+        "proxy-bridge-001",
+        "proxy-bridge-002",
+    ]
+
+
+def test_xray_json_response_can_set_profile_web_page_url_to_channel() -> None:
+    snapshot = {
+        "users": {
+            "tok": {
+                "telegram_id": 123,
+                "uuid": "00000000-0000-0000-0000-000000000001",
+                "main_vpn_active": True,
+                "whitelist_enabled": False,
+                "expire": 1781259930,
+            }
+        }
+    }
+    profile = replace(_profile(), profile_web_page_url="https://t.me/kvpn_public")
+
+    response = build_xray_json_subscription_response(
+        snapshot=snapshot,
+        product="kVPN",
+        token="tok",
+        profile=profile,
+        whitelist_profile=None,
+    )
+
+    assert response is not None
+    assert response.headers["profile-web-page-url"] == "https://t.me/kvpn_public"
 
 
 def test_xray_json_response_returns_empty_profile_list_without_entitlements() -> None:

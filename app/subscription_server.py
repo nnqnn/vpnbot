@@ -51,6 +51,7 @@ class RuntimeConfig:
             support_url=_env("SUPPORT_URL", "https://t.me/kvpn_support"),
             announce_url=_env("SUBSCRIPTION_ANNOUNCE_URL", "https://t.me/kvpn_public"),
             announce_text=_env("SUBSCRIPTION_ANNOUNCE_TEXT", "kVPN: subscription auto-updates."),
+            profile_web_page_url=_env("SUBSCRIPTION_PROFILE_WEB_PAGE_URL", ""),
             vless_public_host=_env("VLESS_PUBLIC_HOST", "s2.nnqnn.tech"),
             vless_public_port=int(_env("VLESS_PUBLIC_PORT", "443")),
             vless_security=_env("VLESS_SECURITY", "reality"),
@@ -65,6 +66,8 @@ class RuntimeConfig:
             vless_header_type=_env("VLESS_HEADER_TYPE", ""),
             vless_remark_prefix=_env("VLESS_REMARK_PREFIX", "kVPN"),
             whitelist_max_nodes=int(_env("WHITELIST_MAX_NODES", "300")),
+            main_bridge_enabled=_env_bool("MAIN_VPN_BRIDGE_ENABLED", True),
+            main_bridge_max_nodes=int(_env("MAIN_VPN_BRIDGE_MAX_NODES", "8")),
             fallback_vless_public_host=_env("VLESS_FALLBACK_PUBLIC_HOST", ""),
             fallback_vless_public_port=int(_env("VLESS_FALLBACK_PUBLIC_PORT", "443")),
             fallback_vless_security=_env("VLESS_FALLBACK_SECURITY", "reality"),
@@ -237,12 +240,19 @@ class SubscriptionHandler(BaseHTTPRequestHandler):
                 whitelist_source_text=self.server.state.whitelist_text() if raw_user.get("whitelist_enabled") else "",
             )
         else:
+            needs_whitelist_profile = bool(
+                raw_user.get("whitelist_enabled")
+                or (
+                    raw_user.get("main_vpn_active")
+                    and self.server.state.config.profile.main_bridge_enabled
+                )
+            )
             response = build_xray_json_subscription_response(
                 snapshot=snapshot,
                 product=product,
                 token=token,
                 profile=self.server.state.config.profile,
-                whitelist_profile=self.server.state.whitelist_profile() if raw_user.get("whitelist_enabled") else None,
+                whitelist_profile=self.server.state.whitelist_profile() if needs_whitelist_profile else None,
             )
         if response is None:
             self._send_text(HTTPStatus.NOT_FOUND, "not found")
@@ -339,6 +349,13 @@ def main() -> None:
 
 def _env(key: str, default: str) -> str:
     return os.environ.get(key, default)
+
+
+def _env_bool(key: str, default: bool) -> bool:
+    value = os.environ.get(key)
+    if value is None:
+        return default
+    return value.strip().lower() in {"1", "true", "yes", "on"}
 
 
 def _raw_subscription_url(base_url: str, product: str, token: str) -> str:
