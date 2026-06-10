@@ -272,7 +272,9 @@ def _build_chained_main_outbound(
     tag: str,
     bridge_tag: str,
 ) -> dict[str, Any]:
-    outbound = build_main_xray_outbound(user, profile, tag=tag)
+    outbound = build_fallback_xray_outbound(user, profile, tag=tag)
+    if outbound is None:
+        outbound = build_main_xray_outbound(user, profile, tag=tag)
     outbound["proxySettings"] = {
         "tag": bridge_tag,
         "transportLayer": True,

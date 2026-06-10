@@ -458,6 +458,14 @@ def test_xray_json_main_profile_can_chain_server2_through_bridge_nodes() -> None
         vless_xhttp_mode="packet-up",
         main_bridge_enabled=True,
         main_bridge_max_nodes=2,
+        fallback_vless_public_host="s2.nnqnn.tech",
+        fallback_vless_public_port=443,
+        fallback_vless_security="reality",
+        fallback_vless_type="tcp",
+        fallback_vless_sni="yandex.ru",
+        fallback_vless_flow="xtls-rprx-vision",
+        fallback_vless_pbk="PUBLIC_KEY",
+        fallback_vless_sid="a1b2c3d4e5f6a7b8",
     )
     bridge_profile = {
         "outbounds": [
@@ -495,9 +503,13 @@ def test_xray_json_main_profile_can_chain_server2_through_bridge_nodes() -> None
     assert "bridge-002" in tags
     chained = next(outbound for outbound in config["outbounds"] if outbound["tag"] == "proxy-bridge-001")
     assert chained["settings"]["vnext"][0]["address"] == "s2.nnqnn.tech"
+    assert chained["streamSettings"]["network"] == "tcp"
+    assert chained["streamSettings"]["security"] == "reality"
+    assert chained["settings"]["vnext"][0]["users"][0]["flow"] == "xtls-rprx-vision"
     assert chained["proxySettings"] == {"tag": "bridge-001", "transportLayer": True}
     assert config["routing"]["balancers"][0]["selector"] == [
         "proxy-cdn",
+        "proxy-direct",
         "proxy-bridge-001",
         "proxy-bridge-002",
     ]
