@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import threading
 import time
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -37,6 +38,10 @@ class RuntimeConfig:
         )
         self.whitelist_profile_url = _env("WHITELIST_PROFILE_URL", "https://vpn.nnqnn.tech/")
         self.whitelist_cache_seconds = int(_env("WHITELIST_CACHE_SECONDS", "300"))
+        self.whitelist_fetch_timeout_seconds = float(_env("WHITELIST_FETCH_TIMEOUT_SECONDS", "4"))
+        self.whitelist_profile_cache_path = Path(
+            _env("WHITELIST_PROFILE_CACHE_PATH", "/var/lib/tgvpn/whitelist_profile_cache.json")
+        )
         self.profile = SubscriptionProfile(
             product=_env("SUBSCRIPTION_PRODUCT", "kVPN"),
             public_base_url=_env("SUBSCRIPTION_PUBLIC_BASE_URL", "https://vpn.nnqnn.tech"),
@@ -47,7 +52,7 @@ class RuntimeConfig:
             announce_url=_env("SUBSCRIPTION_ANNOUNCE_URL", "https://t.me/kvpn_public"),
             announce_text=_env("SUBSCRIPTION_ANNOUNCE_TEXT", "kVPN: subscription auto-updates."),
             vless_public_host=_env("VLESS_PUBLIC_HOST", "s2.nnqnn.tech"),
-            vless_public_port=int(_env("VLESS_PUBLIC_PORT", "9443")),
+            vless_public_port=int(_env("VLESS_PUBLIC_PORT", "443")),
             vless_security=_env("VLESS_SECURITY", "reality"),
             vless_type=_env("VLESS_TYPE", "tcp"),
             vless_sni=_env("VLESS_SNI", "www.cloudflare.com"),
@@ -69,6 +74,7 @@ class SubscriptionState:
         self._whitelist_profile: dict | None = None
         self._whitelist_text_loaded_at = 0.0
         self._whitelist_profile_loaded_at = 0.0
+        self._whitelist_refresh_lock = threading.Lock()
 
     def load_snapshot(self) -> dict:
         try:
@@ -107,11 +113,21 @@ class SubscriptionState:
         if self._whitelist_profile is not None and now - self._whitelist_profile_loaded_at < self.config.whitelist_cache_seconds:
             return self._whitelist_profile
 
+        cached = self._load_whitelist_profile_cache()
+        if cached is not None:
+            self._whitelist_profile = cached
+            self._whitelist_profile_loaded_at = now
+            self._refresh_whitelist_profile_async()
+            return cached
+
+        return self._fetch_whitelist_profile()
+
+    def _fetch_whitelist_profile(self) -> dict | None:
         try:
             response = httpx.get(
                 self.config.whitelist_profile_url,
                 headers={"User-Agent": "tgvpn-subscription-server"},
-                timeout=10,
+                timeout=self.config.whitelist_fetch_timeout_seconds,
             )
             response.raise_for_status()
             payload = response.json()
@@ -124,8 +140,43 @@ class SubscriptionState:
             return self._whitelist_profile
 
         self._whitelist_profile = payload
-        self._whitelist_profile_loaded_at = now
+        self._whitelist_profile_loaded_at = time.monotonic()
+        self._write_whitelist_profile_cache(payload)
         return self._whitelist_profile
+
+    def _load_whitelist_profile_cache(self) -> dict | None:
+        try:
+            payload = json.loads(self.config.whitelist_profile_cache_path.read_text(encoding="utf-8"))
+        except FileNotFoundError:
+            return None
+        except json.JSONDecodeError:
+            logger.warning("Whitelist profile cache is not valid JSON: %s", self.config.whitelist_profile_cache_path)
+            return None
+        except OSError:
+            logger.exception("Cannot read whitelist profile cache")
+            return None
+        return payload if isinstance(payload, dict) else None
+
+    def _write_whitelist_profile_cache(self, payload: dict) -> None:
+        try:
+            self.config.whitelist_profile_cache_path.parent.mkdir(parents=True, exist_ok=True)
+            tmp_path = self.config.whitelist_profile_cache_path.with_suffix(".json.tmp")
+            tmp_path.write_text(json.dumps(payload, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
+            tmp_path.replace(self.config.whitelist_profile_cache_path)
+        except OSError:
+            logger.exception("Cannot write whitelist profile cache")
+
+    def _refresh_whitelist_profile_async(self) -> None:
+        if not self._whitelist_refresh_lock.acquire(blocking=False):
+            return
+
+        def refresh() -> None:
+            try:
+                self._fetch_whitelist_profile()
+            finally:
+                self._whitelist_refresh_lock.release()
+
+        threading.Thread(target=refresh, name="whitelist-profile-refresh", daemon=True).start()
 
 
 class SubscriptionHandler(BaseHTTPRequestHandler):
@@ -185,22 +236,26 @@ class SubscriptionHandler(BaseHTTPRequestHandler):
             self._send_text(HTTPStatus.NOT_FOUND, "not found")
             return
 
+        body = response.body.encode("utf-8")
         self.send_response(HTTPStatus.OK)
         for key, value in response.headers.items():
             self.send_header(key, value)
+        self.send_header("content-length", str(len(body)))
         self.end_headers()
-        self.wfile.write(response.body.encode("utf-8"))
+        self.wfile.write(body)
 
     def log_message(self, format: str, *args) -> None:  # noqa: A002
         message = format % args
         logger.info("%s - %s", self.address_string(), self._redact_tokens(message))
 
     def _send_text(self, status: HTTPStatus, text: str) -> None:
+        body = text.encode("utf-8")
         self.send_response(status)
         self.send_header("content-type", "text/plain; charset=utf-8")
         self.send_header("cache-control", "no-store")
+        self.send_header("content-length", str(len(body)))
         self.end_headers()
-        self.wfile.write(text.encode("utf-8"))
+        self.wfile.write(body)
 
     def _send_health(self) -> None:
         snapshot = self.server.state.load_snapshot()
@@ -211,11 +266,13 @@ class SubscriptionHandler(BaseHTTPRequestHandler):
             "generated_at": snapshot.get("generated_at"),
             "users": len(users) if isinstance(users, dict) else 0,
         }
+        body = json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
         self.send_response(HTTPStatus.OK)
         self.send_header("content-type", "application/json; charset=utf-8")
         self.send_header("cache-control", "no-store")
+        self.send_header("content-length", str(len(body)))
         self.end_headers()
-        self.wfile.write(json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8"))
+        self.wfile.write(body)
 
     def _send_happ_redirect(self, product: str, token: str) -> None:
         https_url = _raw_subscription_url(self.server.state.config.profile.public_base_url, product, token)
@@ -228,11 +285,13 @@ class SubscriptionHandler(BaseHTTPRequestHandler):
             f'<a href="{_escape_html(happ_url)}">Open Happ</a>'
             "</body></html>"
         )
+        body = html.encode("utf-8")
         self.send_response(HTTPStatus.OK)
         self.send_header("content-type", "text/html; charset=utf-8")
         self.send_header("cache-control", "no-store")
+        self.send_header("content-length", str(len(body)))
         self.end_headers()
-        self.wfile.write(html.encode("utf-8"))
+        self.wfile.write(body)
 
     @staticmethod
     def _redact_tokens(message: str) -> str:

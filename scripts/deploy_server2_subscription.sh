@@ -10,6 +10,8 @@ SERVER2_USER="${SUBSCRIPTION_SERVER2_USER:-root}"
 SERVER2_DIR="${SUBSCRIPTION_SERVER2_DIR:-/home/tgvpn}"
 DIRECT_HOST="${SUBSCRIPTION_DIRECT_HOST:-s2.nnqnn.tech}"
 DIRECT_PORT="${SUBSCRIPTION_DIRECT_PORT:-9443}"
+PUBLIC_VLESS_PORT="${SUBSCRIPTION_PUBLIC_VLESS_PORT:-443}"
+NGINX_HTTPS_BACKEND_PORT="${SUBSCRIPTION_NGINX_HTTPS_BACKEND_PORT:-8443}"
 SUBSCRIPTION_PORT="${SUBSCRIPTION_LISTEN_PORT:-8088}"
 LETSENCRYPT_EMAIL="${LETSENCRYPT_EMAIL:-}"
 ORIGIN_SECRET="${SUBSCRIPTION_ORIGIN_SECRET:-}"
@@ -73,6 +75,8 @@ load_optional_env SUBSCRIPTION_SERVER2_USER
 load_optional_env SUBSCRIPTION_SERVER2_DIR
 load_optional_env SUBSCRIPTION_DIRECT_HOST
 load_optional_env SUBSCRIPTION_DIRECT_PORT
+load_optional_env SUBSCRIPTION_PUBLIC_VLESS_PORT
+load_optional_env SUBSCRIPTION_NGINX_HTTPS_BACKEND_PORT
 load_optional_env LETSENCRYPT_EMAIL
 
 SERVER2_HOST="${SUBSCRIPTION_SERVER2_HOST:-$SERVER2_HOST}"
@@ -80,6 +84,8 @@ SERVER2_USER="${SUBSCRIPTION_SERVER2_USER:-$SERVER2_USER}"
 SERVER2_DIR="${SUBSCRIPTION_SERVER2_DIR:-$SERVER2_DIR}"
 DIRECT_HOST="${SUBSCRIPTION_DIRECT_HOST:-$DIRECT_HOST}"
 DIRECT_PORT="${SUBSCRIPTION_DIRECT_PORT:-$DIRECT_PORT}"
+PUBLIC_VLESS_PORT="${SUBSCRIPTION_PUBLIC_VLESS_PORT:-$PUBLIC_VLESS_PORT}"
+NGINX_HTTPS_BACKEND_PORT="${SUBSCRIPTION_NGINX_HTTPS_BACKEND_PORT:-$NGINX_HTTPS_BACKEND_PORT}"
 LETSENCRYPT_EMAIL="${LETSENCRYPT_EMAIL:-$LETSENCRYPT_EMAIL}"
 ORIGIN_SECRET="${SUBSCRIPTION_ORIGIN_SECRET:-$ORIGIN_SECRET}"
 REQUIRE_ORIGIN_SECRET="${SUBSCRIPTION_REQUIRE_ORIGIN_SECRET:-$REQUIRE_ORIGIN_SECRET}"
@@ -128,6 +134,7 @@ set -Eeuo pipefail
 server_dir="$SERVER2_DIR"
 direct_host="$DIRECT_HOST"
 direct_port="$DIRECT_PORT"
+public_vless_port="$PUBLIC_VLESS_PORT"
 subscription_port="$SUBSCRIPTION_PORT"
 origin_secret="$ORIGIN_SECRET"
 public_key="$PUBLIC_KEY"
@@ -197,7 +204,7 @@ SUBSCRIPTION_TRAFFIC_TOTAL_BYTES=0
 SUBSCRIPTION_ANNOUNCE_TEXT=kVPN: подписка обновляется автоматически.
 SUBSCRIPTION_ANNOUNCE_URL=https://t.me/kvpn_public
 VLESS_PUBLIC_HOST=\$direct_host
-VLESS_PUBLIC_PORT=\$direct_port
+VLESS_PUBLIC_PORT=\$public_vless_port
 VLESS_SECURITY=reality
 VLESS_TYPE=tcp
 VLESS_SNI=yandex.ru
@@ -213,6 +220,8 @@ WHITELIST_PROFILE_URL=https://vpn.nnqnn.tech/
 WHITELIST_SOURCE_URL=https://raw.githubusercontent.com/zieng2/wl/main/vless_universal.txt
 WHITELIST_MAX_NODES=300
 WHITELIST_CACHE_SECONDS=300
+WHITELIST_FETCH_TIMEOUT_SECONDS=4
+WHITELIST_PROFILE_CACHE_PATH=/var/lib/tgvpn/whitelist_profile_cache.json
 ENV
 chmod 600 "\$server_dir/.env.subscription"
 if [[ -n "\$origin_secret" ]]; then
@@ -254,7 +263,6 @@ else
 fi
 systemctl is-active --quiet xray
 xray api inboundusercount --server=127.0.0.1:10085 --timeout=5 -tag=upstream-in --json >/dev/null
-python3 "\$server_dir/scripts/smoke_server2_direct_vless.py"
 
 echo "server2 subscription deployed"
 if [[ -n "\$origin_secret" ]]; then
@@ -276,13 +284,20 @@ set -Eeuo pipefail
 
 server_dir="$SERVER2_DIR"
 direct_host="$DIRECT_HOST"
+direct_port="$DIRECT_PORT"
+public_vless_port="$PUBLIC_VLESS_PORT"
+nginx_https_backend_port="$NGINX_HTTPS_BACKEND_PORT"
 subscription_port="$SUBSCRIPTION_PORT"
 letsencrypt_email="$LETSENCRYPT_EMAIL"
 
 apt-get update >/dev/null
-DEBIAN_FRONTEND=noninteractive apt-get install -y nginx certbot python3-certbot-nginx >/dev/null
+DEBIAN_FRONTEND=noninteractive apt-get install -y nginx libnginx-mod-stream certbot python3-certbot-nginx >/dev/null
 mkdir -p /var/www/html
+mkdir -p /etc/nginx/stream-conf.d
 rm -f /etc/nginx/sites-enabled/tgvpn-subscription.conf
+if ! grep -q 'include /etc/nginx/stream-conf.d/\*.conf;' /etc/nginx/nginx.conf; then
+  printf '\ninclude /etc/nginx/stream-conf.d/*.conf;\n' >> /etc/nginx/nginx.conf
+fi
 
 cat > /etc/nginx/sites-available/tgvpn-subscription-bootstrap.conf <<NGINX
 server {
@@ -317,12 +332,36 @@ fi
 certbot "\${certbot_args[@]}"
 
 cp "\$server_dir/deploy/nginx/s2.nnqnn.tech.conf" /etc/nginx/sites-available/tgvpn-subscription.conf
-sed -i "s/s2\\.nnqnn\\.tech/\$direct_host/g; s/127\\.0\\.0\\.1:8088/127.0.0.1:\$subscription_port/g" /etc/nginx/sites-available/tgvpn-subscription.conf
+sed -i "s/s2\\.nnqnn\\.tech/\$direct_host/g; s/127\\.0\\.0\\.1:8088/127.0.0.1:\$subscription_port/g; s/127\\.0\\.0\\.1:8443/127.0.0.1:\$nginx_https_backend_port/g" /etc/nginx/sites-available/tgvpn-subscription.conf
 ln -sf /etc/nginx/sites-available/tgvpn-subscription.conf /etc/nginx/sites-enabled/tgvpn-subscription.conf
 rm -f /etc/nginx/sites-enabled/tgvpn-subscription-bootstrap.conf
+if [[ "\$public_vless_port" == "443" ]]; then
+  cat > /etc/nginx/stream-conf.d/tgvpn-sni.conf <<NGINX
+stream {
+    map \\\$ssl_preread_server_name \\\$tgvpn_backend {
+        \$direct_host 127.0.0.1:\$nginx_https_backend_port;
+        default 127.0.0.1:\$direct_port;
+    }
+
+    server {
+        listen 443;
+        proxy_pass \\\$tgvpn_backend;
+        ssl_preread on;
+        proxy_connect_timeout 5s;
+        proxy_timeout 1h;
+    }
+}
+NGINX
+else
+  rm -f /etc/nginx/stream-conf.d/tgvpn-sni.conf
+fi
 nginx -t
 systemctl reload nginx
 curl -fsS "https://\$direct_host/healthz" >/dev/null
+if [[ "\$public_vless_port" == "443" ]]; then
+  timeout 5 bash -c "</dev/tcp/127.0.0.1/\$nginx_https_backend_port"
+fi
+python3 "\$server_dir/scripts/smoke_server2_direct_vless.py"
 REMOTE_NGINX
 fi
 
