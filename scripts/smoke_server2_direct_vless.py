@@ -29,7 +29,10 @@ def main() -> None:
         print("direct VLESS smoke skipped: no active main VPN user in snapshot")
         return
 
-    required = ["VLESS_PUBLIC_HOST", "VLESS_PUBLIC_PORT", "VLESS_PBK", "VLESS_SID"]
+    security = (env.get("VLESS_SECURITY") or "reality").lower()
+    required = ["VLESS_PUBLIC_HOST", "VLESS_PUBLIC_PORT"]
+    if security == "reality":
+        required.extend(["VLESS_PBK", "VLESS_SID"])
     missing = [key for key in required if not env.get(key)]
     if missing:
         raise SystemExit(f"direct VLESS smoke failed: missing env keys: {', '.join(missing)}")
