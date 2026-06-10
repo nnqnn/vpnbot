@@ -157,6 +157,7 @@ def write_config_atomic(path: Path, data: dict[str, Any], *, xray_bin: str, time
         if path.exists():
             shutil.copy2(path, backup)
         tmp_path.replace(path)
+        path.chmod(0o644)
     finally:
         tmp_path.unlink(missing_ok=True)
 

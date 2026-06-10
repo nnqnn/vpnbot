@@ -49,6 +49,7 @@ def main() -> None:
     )
 
     if not changed:
+        config_path.chmod(0o644)
         print("xray api config already up to date")
         return
 
@@ -57,6 +58,7 @@ def main() -> None:
     )
     shutil.copy2(config_path, backup_path)
     config_path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+    config_path.chmod(0o644)
     print(f"updated {config_path}; backup={backup_path}")
 
 
