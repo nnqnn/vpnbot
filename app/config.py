@@ -53,6 +53,7 @@ class Settings(BaseSettings):
     xray_api_server: str = Field(default="127.0.0.1:10085", alias="XRAY_API_SERVER")
     xray_api_timeout_seconds: int = Field(default=5, alias="XRAY_API_TIMEOUT_SECONDS")
     xray_bin_path: str = Field(default="xray", alias="XRAY_BIN_PATH")
+    xray_persist_users_in_config: bool = Field(default=False, alias="XRAY_PERSIST_USERS_IN_CONFIG")
     xray_remote_command_timeout_seconds: int = Field(default=120, alias="XRAY_REMOTE_COMMAND_TIMEOUT_SECONDS")
     xray_startup_sync_timeout_seconds: int = Field(default=180, alias="XRAY_STARTUP_SYNC_TIMEOUT_SECONDS")
     xray_remote_helper_path: str = Field(

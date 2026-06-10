@@ -30,6 +30,7 @@ from app.services.xray_service import XrayService
 from scripts.configure_server2_xray_api import ensure_xray_api
 from scripts.reconcile_server2_xray_users import (
     runtime_matches,
+    strip_managed_clients_from_config,
     sync_managed_clients_in_config,
 )
 
@@ -591,6 +592,31 @@ def test_remote_reconcile_syncs_cdn_ws_inbound_without_flow() -> None:
     ]
     assert config["inbounds"][1]["settings"]["clients"] == [
         {"id": "active-id", "email": "user-2@vpn.local"},
+    ]
+
+
+def test_remote_reconcile_can_strip_managed_users_from_config() -> None:
+    config = {
+        "inbounds": [
+            {
+                "tag": "upstream-in",
+                "settings": {
+                    "clients": [
+                        {"id": "old-chain-id", "email": "old-server@chain.local"},
+                        {"id": "active-id", "email": "user-2@vpn.local", "flow": "xtls-rprx-vision"},
+                    ]
+                },
+            }
+        ]
+    }
+
+    changed = strip_managed_clients_from_config(config, inbound_tag="upstream-in")
+    second_changed = strip_managed_clients_from_config(config, inbound_tag="upstream-in")
+
+    assert changed is True
+    assert second_changed is False
+    assert config["inbounds"][0]["settings"]["clients"] == [
+        {"id": "old-chain-id", "email": "old-server@chain.local"},
     ]
 
 

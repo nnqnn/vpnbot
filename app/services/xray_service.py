@@ -51,7 +51,7 @@ class XrayService:
             async with self._lock:
                 for inbound_tag in self._managed_inbound_tags():
                     await self._add_user_via_api_unlocked(email=email, user_uuid=user_uuid, inbound_tag=inbound_tag)
-                if self._is_ssh_api_mode():
+                if self._is_ssh_api_mode() and self._persist_users_in_config():
                     await self._persist_remote_config_upsert_unlocked(email=email, user_uuid=user_uuid)
             return
         await self._upsert_client(email=email, user_uuid=user_uuid)
@@ -62,7 +62,7 @@ class XrayService:
             async with self._lock:
                 for inbound_tag in self._managed_inbound_tags():
                     await self._remove_user_via_api_unlocked(email=email, inbound_tag=inbound_tag)
-                if self._is_ssh_api_mode():
+                if self._is_ssh_api_mode() and self._persist_users_in_config():
                     await self._persist_remote_config_remove_unlocked(email=email)
             return
         await self._remove_client(email=email)
@@ -318,6 +318,7 @@ class XrayService:
             "xray_config_path": str(self.settings.xray_config_path),
             "xray_inbound_tag": self.settings.xray_inbound_tag,
             "xray_extra_inbound_tags": self._extra_inbound_tags(),
+            "persist_users_in_config": self._persist_users_in_config(),
             "vless_flow": self.settings.vless_flow,
             "expected": expected_by_email,
             "managed_emails": managed_emails,
@@ -637,6 +638,9 @@ class XrayService:
 
     def _is_ssh_api_mode(self) -> bool:
         return self.settings.xray_control_mode.strip().lower() in {"ssh_api", "remote_api"}
+
+    def _persist_users_in_config(self) -> bool:
+        return bool(getattr(self.settings, "xray_persist_users_in_config", False))
 
     def _extra_inbound_tags(self) -> list[str]:
         raw_value = getattr(self.settings, "xray_extra_inbound_tags", "")

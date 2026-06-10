@@ -153,6 +153,8 @@ docker-compose.yml
 Технически бот передает в `adu` временный JSON с inbound `tag` и `clients`, а для удаления использует `rmu -tag=<tag> <email>`.  
 `email` в Xray используется как уникальный идентификатор пользователя (`user-<telegram_id>@vpn.local`).
 
+По умолчанию `XRAY_PERSIST_USERS_IN_CONFIG=false`: пользователи живут в runtime Xray и восстанавливаются регулярным sync из БД, а `config.json` не раздувается клиентской базой. Если нужен fallback с загрузкой клиентов прямо из config после рестарта Xray, можно включить `XRAY_PERSIST_USERS_IN_CONFIG=true`.
+
 Если нужен fallback, оставляйте `config`-режим.
 
 ### API vs JSON
