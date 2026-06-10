@@ -215,15 +215,15 @@ if [[ -n "\$public_key" && "\$public_key" != "\$effective_public_key" ]]; then
 fi
 
 	profile_host="\$server2_host"
-	profile_port=443
-	profile_security=tls
-	profile_type=xhttp
-	profile_sni="\$direct_host"
-	profile_flow=
+	profile_port="\$public_vless_port"
+	profile_security=reality
+	profile_type=tcp
+	profile_sni=yandex.ru
+	profile_flow=xtls-rprx-vision
 	profile_fp=chrome
-	profile_pbk=
-	profile_sid=
-	profile_path="\$xhttp_path"
+	profile_pbk="\$effective_public_key"
+	profile_sid=a1b2c3d4e5f6a7b8
+	profile_path=
 	
 	cat > "\$server_dir/.env.subscription" <<ENV
 LOG_LEVEL=INFO
@@ -253,25 +253,25 @@ VLESS_PATH=\$profile_path
 VLESS_XHTTP_MODE=\$xhttp_mode
 VLESS_HEADER_TYPE=
 VLESS_REMARK_PREFIX=kVPN
-VLESS_FALLBACK_PUBLIC_HOST=\$server2_host
+VLESS_FALLBACK_PUBLIC_HOST=
 VLESS_FALLBACK_PUBLIC_PORT=\$public_vless_port
 VLESS_FALLBACK_SECURITY=reality
 VLESS_FALLBACK_TYPE=tcp
 VLESS_FALLBACK_SNI=yandex.ru
 VLESS_FALLBACK_FLOW=xtls-rprx-vision
 VLESS_FALLBACK_FP=chrome
-VLESS_FALLBACK_PBK=\$effective_public_key
+VLESS_FALLBACK_PBK=
 VLESS_FALLBACK_SID=a1b2c3d4e5f6a7b8
 VLESS_FALLBACK_PATH=
 VLESS_FALLBACK_XHTTP_MODE=packet-up
-VLESS_LEGACY_PUBLIC_HOST=5.129.213.120
+VLESS_LEGACY_PUBLIC_HOST=
 VLESS_LEGACY_PUBLIC_PORT=8443
 VLESS_LEGACY_SECURITY=reality
 VLESS_LEGACY_TYPE=tcp
 VLESS_LEGACY_SNI=yandex.ru
 VLESS_LEGACY_FLOW=xtls-rprx-vision
 VLESS_LEGACY_FP=chrome
-VLESS_LEGACY_PBK=vWH5uszwPGM8Qa6qcSqrOi06bwfdDU2MtSvZddTnIw0
+VLESS_LEGACY_PBK=
 VLESS_LEGACY_SID=c0ba09b546ccb4a8
 VLESS_LEGACY_PATH=
 VLESS_LEGACY_XHTTP_MODE=packet-up
@@ -396,7 +396,8 @@ PY
 	fi
 	for _ in \$(seq 1 20); do
 	  if systemctl is-active --quiet tgvpn-subscription.service \
-	    && grep -q '^VLESS_TYPE=xhttp$' "\$server_dir/.env.subscription" \
+	    && grep -q '^VLESS_TYPE=tcp$' "\$server_dir/.env.subscription" \
+	    && grep -q '^VLESS_SECURITY=reality$' "\$server_dir/.env.subscription" \
 	    && grep -q "^VLESS_PUBLIC_HOST=\${server2_host}\$" "\$server_dir/.env.subscription"; then
 	    break
 	  fi

@@ -448,19 +448,22 @@ XRAY_REMOTE_PASSWORD=SERVER2_ROOT_PASSWORD_OR_EMPTY_IF_KEY_AUTH
 
 VLESS_PUBLIC_HOST=89.125.50.96
 VLESS_PUBLIC_PORT=443
-VLESS_SECURITY=tls
-VLESS_TYPE=xhttp
-VLESS_SNI=s2.nnqnn.tech
-VLESS_FLOW=
-VLESS_PATH=/kvpn-xhttp
+VLESS_SECURITY=reality
+VLESS_TYPE=tcp
+VLESS_SNI=yandex.ru
+VLESS_FLOW=xtls-rprx-vision
+VLESS_FP=chrome
+VLESS_PBK=SERVER2_REALITY_PUBLIC_KEY
+VLESS_SID=a1b2c3d4e5f6a7b8
+VLESS_PATH=
 VLESS_XHTTP_MODE=packet-up
-VLESS_FALLBACK_PUBLIC_HOST=89.125.50.96
+VLESS_FALLBACK_PUBLIC_HOST=
 VLESS_FALLBACK_PUBLIC_PORT=443
 VLESS_FALLBACK_SECURITY=reality
 VLESS_FALLBACK_TYPE=tcp
 VLESS_FALLBACK_SNI=yandex.ru
 VLESS_FALLBACK_FLOW=xtls-rprx-vision
-VLESS_FALLBACK_PBK=SERVER2_REALITY_PUBLIC_KEY
+VLESS_FALLBACK_PBK=
 
 SUBSCRIPTION_PUBLIC_BASE_URL=https://s2.nnqnn.tech
 SUBSCRIPTION_LINKS_ENABLED=true
@@ -476,7 +479,7 @@ SUBSCRIPTION_ENABLE_CLOUDFLARED=false
 ```
 
 `SUBSCRIPTION_LINKS_ENABLED=true` включает выдачу Happ-ссылок через `s2.nnqnn.tech`.
-Основной Happ-элемент содержит XHTTP/TLS endpoint за настоящим Nginx и direct Reality fallback. Для РФ основным рабочим путем является XHTTP/TLS: клиент подключается к IP сервера #2, но отправляет SNI/Host `s2.nnqnn.tech`; внутри Nginx проксирует `/kvpn-xhttp` в Xray. Reality остается резервом для сетей, где он не режется, и не создает второго элемента в списке Happ.
+Основной Happ-элемент содержит один маршрут: VLESS REALITY Vision на `89.125.50.96:443` с SNI `yandex.ru`. На server #2 Nginx stream пропускает SNI `yandex.ru` в Xray `upstream-in`, а HTTPS-подписка `s2.nnqnn.tech` остается отдельным SNI на том же публичном порту. Fallback-и в основном профиле по умолчанию отключены, чтобы Happ не переключал пользователя на нестабильный маршрут.
 
 На server #2:
 
