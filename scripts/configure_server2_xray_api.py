@@ -58,6 +58,7 @@ def ensure_xray_api(
     private_key: str = "",
 ) -> bool:
     changed = False
+    changed = remove_conflicting_public_migrate_inbound(data, keep_tag=inbound_tag) or changed
     changed = ensure_direct_vless_reality_inbound(
         data,
         inbound_tag=inbound_tag,
@@ -114,6 +115,26 @@ def ensure_xray_api(
             changed = True
 
     return changed
+
+
+def remove_conflicting_public_migrate_inbound(data: dict[str, Any], *, keep_tag: str) -> bool:
+    inbounds = data.setdefault("inbounds", [])
+    if not isinstance(inbounds, list):
+        return False
+    updated = [
+        inbound
+        for inbound in inbounds
+        if not (
+            isinstance(inbound, dict)
+            and inbound.get("tag") == "public-migrate-443"
+            and inbound.get("tag") != keep_tag
+            and int(inbound.get("port") or 0) == 443
+        )
+    ]
+    if len(updated) == len(inbounds):
+        return False
+    data["inbounds"] = updated
+    return True
 
 
 def ensure_direct_vless_reality_inbound(

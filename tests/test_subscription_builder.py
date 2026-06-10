@@ -419,6 +419,14 @@ def test_server2_xray_api_config_preserves_old_chain_client() -> None:
     config = {
         "inbounds": [
             {
+                "tag": "public-migrate-443",
+                "listen": "0.0.0.0",
+                "port": 443,
+                "protocol": "vless",
+                "settings": {"clients": []},
+                "streamSettings": {"network": "tcp", "security": "reality"},
+            },
+            {
                 "tag": "upstream-in",
                 "port": 9443,
                 "protocol": "vless",
@@ -449,8 +457,10 @@ def test_server2_xray_api_config_preserves_old_chain_client() -> None:
     changed = ensure_xray_api(config, api_port=10085)
 
     assert changed is True
-    assert config["inbounds"][0]["settings"]["clients"][0]["email"] == "old-server@chain.local"
-    assert "yandex.ru" in config["inbounds"][0]["streamSettings"]["realitySettings"]["serverNames"]
+    assert not any(inbound["tag"] == "public-migrate-443" for inbound in config["inbounds"])
+    upstream = next(inbound for inbound in config["inbounds"] if inbound["tag"] == "upstream-in")
+    assert upstream["settings"]["clients"][0]["email"] == "old-server@chain.local"
+    assert "yandex.ru" in upstream["streamSettings"]["realitySettings"]["serverNames"]
     assert any(inbound["tag"] == "api" for inbound in config["inbounds"])
     assert config["routing"]["rules"][0] == {"type": "field", "inboundTag": ["api"], "outboundTag": "api"}
 
