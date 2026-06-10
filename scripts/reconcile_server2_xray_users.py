@@ -30,6 +30,8 @@ def main() -> None:
 def reconcile(payload: dict[str, Any]) -> dict[str, Any]:
     config_path = Path(payload["xray_config_path"])
     inbound_tag = str(payload["xray_inbound_tag"])
+    extra_inbound_tags = [str(tag) for tag in (payload.get("xray_extra_inbound_tags") or []) if str(tag)]
+    inbound_tags = [inbound_tag] + [tag for tag in extra_inbound_tags if tag != inbound_tag]
     xray_bin = str(payload.get("xray_bin_path") or "xray")
     api_server = str(payload.get("xray_api_server") or "127.0.0.1:10085")
     api_timeout = int(payload.get("xray_api_timeout_seconds") or 5)
@@ -39,7 +41,10 @@ def reconcile(payload: dict[str, Any]) -> dict[str, Any]:
     managed_emails = {str(email) for email in (payload.get("managed_emails") or [])}
 
     config = read_json(config_path)
-    config_changed = sync_managed_clients_in_config(config, inbound_tag=inbound_tag, expected=expected, flow=flow)
+    config_changed = False
+    for tag in inbound_tags:
+        tag_flow = flow if tag == inbound_tag else ""
+        config_changed = sync_managed_clients_in_config(config, inbound_tag=tag, expected=expected, flow=tag_flow) or config_changed
     if config_changed:
         write_config_atomic(config_path, config, xray_bin=xray_bin, timeout=command_timeout)
 
@@ -47,6 +52,7 @@ def reconcile(payload: dict[str, Any]) -> dict[str, Any]:
     summary = {
         "expected": len(expected),
         "managed": len(managed_emails),
+        "inbounds": inbound_tags,
         "config_changed": config_changed,
         "removed": 0,
         "added": 0,
@@ -55,64 +61,66 @@ def reconcile(payload: dict[str, Any]) -> dict[str, Any]:
         "errors": [],
     }
 
-    for email in to_remove:
-        ok, detail = remove_runtime_user(
-            xray_bin=xray_bin,
-            api_server=api_server,
-            api_timeout=api_timeout,
-            command_timeout=command_timeout,
-            inbound_tag=inbound_tag,
-            email=email,
-        )
-        if ok:
-            summary["removed"] += 1
-        else:
-            summary["errors"].append({"email": email, "operation": "remove", "detail": detail})
-
-    for email, user_uuid in sorted(expected.items()):
-        state = get_runtime_user(
-            xray_bin=xray_bin,
-            api_server=api_server,
-            api_timeout=api_timeout,
-            command_timeout=command_timeout,
-            inbound_tag=inbound_tag,
-            email=email,
-        )
-        if state["present"] and runtime_matches(state["stdout"], email=email, user_uuid=user_uuid, flow=flow):
-            summary["skipped"] += 1
-            continue
-
-        if state["present"]:
+    for tag in inbound_tags:
+        tag_flow = flow if tag == inbound_tag else ""
+        for email in to_remove:
             ok, detail = remove_runtime_user(
                 xray_bin=xray_bin,
                 api_server=api_server,
                 api_timeout=api_timeout,
                 command_timeout=command_timeout,
-                inbound_tag=inbound_tag,
+                inbound_tag=tag,
                 email=email,
             )
-            if not ok:
-                summary["errors"].append({"email": email, "operation": "replace-remove", "detail": detail})
-                continue
-            operation = "updated"
-        else:
-            operation = "added"
+            if ok:
+                summary["removed"] += 1
+            else:
+                summary["errors"].append({"inbound": tag, "email": email, "operation": "remove", "detail": detail})
 
-        ok, detail = add_runtime_user(
-            config=config,
-            xray_bin=xray_bin,
-            api_server=api_server,
-            api_timeout=api_timeout,
-            command_timeout=command_timeout,
-            inbound_tag=inbound_tag,
-            email=email,
-            user_uuid=user_uuid,
-            flow=flow,
-        )
-        if ok:
-            summary[operation] += 1
-        else:
-            summary["errors"].append({"email": email, "operation": operation, "detail": detail})
+        for email, user_uuid in sorted(expected.items()):
+            state = get_runtime_user(
+                xray_bin=xray_bin,
+                api_server=api_server,
+                api_timeout=api_timeout,
+                command_timeout=command_timeout,
+                inbound_tag=tag,
+                email=email,
+            )
+            if state["present"] and runtime_matches(state["stdout"], email=email, user_uuid=user_uuid, flow=tag_flow):
+                summary["skipped"] += 1
+                continue
+
+            if state["present"]:
+                ok, detail = remove_runtime_user(
+                    xray_bin=xray_bin,
+                    api_server=api_server,
+                    api_timeout=api_timeout,
+                    command_timeout=command_timeout,
+                    inbound_tag=tag,
+                    email=email,
+                )
+                if not ok:
+                    summary["errors"].append({"inbound": tag, "email": email, "operation": "replace-remove", "detail": detail})
+                    continue
+                operation = "updated"
+            else:
+                operation = "added"
+
+            ok, detail = add_runtime_user(
+                config=config,
+                xray_bin=xray_bin,
+                api_server=api_server,
+                api_timeout=api_timeout,
+                command_timeout=command_timeout,
+                inbound_tag=tag,
+                email=email,
+                user_uuid=user_uuid,
+                flow=tag_flow,
+            )
+            if ok:
+                summary[operation] += 1
+            else:
+                summary["errors"].append({"inbound": tag, "email": email, "operation": operation, "detail": detail})
 
     if summary["errors"]:
         raise RuntimeError(json.dumps(summary, ensure_ascii=False, separators=(",", ":")))

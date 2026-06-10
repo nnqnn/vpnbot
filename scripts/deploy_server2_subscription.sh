@@ -151,10 +151,13 @@ DEBIAN_FRONTEND=noninteractive apt-get install -y python3-httpx python3-dotenv c
 before_hash="\$(sha256sum "\$xray_config" | awk '{print \$1}')"
 python3 "\$server_dir/scripts/configure_server2_xray_api.py" \
   --config "\$xray_config" \
-  --api-port 10085 \
-  --inbound-tag upstream-in \
-  --direct-port "\$direct_port" \
-  --server-name www.cloudflare.com \
+	  --api-port 10085 \
+	  --inbound-tag upstream-in \
+	  --direct-port "\$direct_port" \
+	  --cdn-ws-inbound-tag cdn-ws-in \
+	  --cdn-ws-port 10086 \
+	  --cdn-ws-path /kvpn-ws \
+	  --server-name www.cloudflare.com \
   --server-name yandex.ru \
   --short-id a1b2c3d4e5f6a7b8 \
   --flow xtls-rprx-vision \
@@ -189,7 +192,39 @@ if [[ -n "\$public_key" && "\$public_key" != "\$effective_public_key" ]]; then
   echo "WARNING: provided SUBSCRIPTION_SERVER2_VLESS_PBK does not match server2 REALITY private key; using derived public key." >&2
 fi
 
-cat > "\$server_dir/.env.subscription" <<ENV
+	tunnel_url_file=/var/lib/tgvpn/cloudflared_quick_url
+	tunnel_host=""
+	if [[ -f "\$tunnel_url_file" ]]; then
+	  tunnel_url="\$(cat "\$tunnel_url_file" || true)"
+	  tunnel_host="\${tunnel_url#https://}"
+	  tunnel_host="\${tunnel_host#http://}"
+	  tunnel_host="\${tunnel_host%%/*}"
+	fi
+	if [[ -n "\$tunnel_host" ]]; then
+	  profile_host="\$tunnel_host"
+	  profile_port=443
+	  profile_security=tls
+	  profile_type=ws
+	  profile_sni="\$tunnel_host"
+	  profile_flow=
+	  profile_fp=chrome
+	  profile_pbk=
+	  profile_sid=
+	  profile_path=/kvpn-ws
+	else
+	  profile_host="\$direct_host"
+	  profile_port="\$public_vless_port"
+	  profile_security=reality
+	  profile_type=tcp
+	  profile_sni=yandex.ru
+	  profile_flow=xtls-rprx-vision
+	  profile_fp=chrome
+	  profile_pbk="\$effective_public_key"
+	  profile_sid=a1b2c3d4e5f6a7b8
+	  profile_path=
+	fi
+	
+	cat > "\$server_dir/.env.subscription" <<ENV
 LOG_LEVEL=INFO
 SUBSCRIPTION_LISTEN_HOST=127.0.0.1
 SUBSCRIPTION_LISTEN_PORT=\$subscription_port
@@ -203,16 +238,16 @@ SUBSCRIPTION_UPDATE_INTERVAL_HOURS=1
 SUBSCRIPTION_TRAFFIC_TOTAL_BYTES=0
 SUBSCRIPTION_ANNOUNCE_TEXT=kVPN: подписка обновляется автоматически.
 SUBSCRIPTION_ANNOUNCE_URL=https://t.me/kvpn_public
-VLESS_PUBLIC_HOST=\$direct_host
-VLESS_PUBLIC_PORT=\$public_vless_port
-VLESS_SECURITY=reality
-VLESS_TYPE=tcp
-VLESS_SNI=yandex.ru
-VLESS_FLOW=xtls-rprx-vision
-VLESS_FP=chrome
-VLESS_PBK=\$effective_public_key
-VLESS_SID=a1b2c3d4e5f6a7b8
-VLESS_PATH=
+VLESS_PUBLIC_HOST=\$profile_host
+VLESS_PUBLIC_PORT=\$profile_port
+VLESS_SECURITY=\$profile_security
+VLESS_TYPE=\$profile_type
+VLESS_SNI=\$profile_sni
+VLESS_FLOW=\$profile_flow
+VLESS_FP=\$profile_fp
+VLESS_PBK=\$profile_pbk
+VLESS_SID=\$profile_sid
+VLESS_PATH=\$profile_path
 VLESS_HEADER_TYPE=
 VLESS_REMARK_PREFIX=kVPN
 SUPPORT_URL=https://t.me/kvpn_public
@@ -236,9 +271,11 @@ if [[ ! -f /var/lib/tgvpn/subscription_snapshot.json ]]; then
     > /var/lib/tgvpn/subscription_snapshot.json
 fi
 
-cp "\$server_dir/deploy/systemd/tgvpn-subscription.service" /etc/systemd/system/tgvpn-subscription.service
-systemctl daemon-reload
-systemctl enable --now tgvpn-subscription.service
+	cp "\$server_dir/deploy/systemd/tgvpn-subscription.service" /etc/systemd/system/tgvpn-subscription.service
+	cp "\$server_dir/deploy/systemd/tgvpn-cloudflared.service" /etc/systemd/system/tgvpn-cloudflared.service
+	chmod +x "\$server_dir/scripts/run_cloudflared_quick_tunnel.sh"
+	systemctl daemon-reload
+	systemctl enable --now tgvpn-subscription.service
 systemctl restart tgvpn-subscription.service
 for _ in \$(seq 1 20); do
   if systemctl is-active --quiet tgvpn-subscription.service \
@@ -261,10 +298,35 @@ if [[ "\$xray_config_changed" == "true" || "\$restart_xray" == "true" ]]; then
 else
   echo "xray config unchanged; checking without restart"
 fi
-systemctl is-active --quiet xray
-xray api inboundusercount --server=127.0.0.1:10085 --timeout=5 -tag=upstream-in --json >/dev/null
+	systemctl is-active --quiet xray
+	xray api inboundusercount --server=127.0.0.1:10085 --timeout=5 -tag=upstream-in --json >/dev/null
+	xray api inboundusercount --server=127.0.0.1:10085 --timeout=5 -tag=cdn-ws-in --json >/dev/null
+	if ! command -v cloudflared >/dev/null 2>&1; then
+	  curl -fsSL -o /tmp/cloudflared-linux-amd64.deb \
+	    https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb
+	  DEBIAN_FRONTEND=noninteractive apt-get install -y /tmp/cloudflared-linux-amd64.deb >/dev/null
+	fi
+	systemctl enable --now tgvpn-cloudflared.service
+	systemctl restart tgvpn-cloudflared.service
+	for _ in \$(seq 1 60); do
+	  if [[ -s /var/lib/tgvpn/cloudflared_quick_url ]]; then
+	    break
+	  fi
+	  sleep 1
+	done
+	if [[ ! -s /var/lib/tgvpn/cloudflared_quick_url ]]; then
+	  journalctl -u tgvpn-cloudflared.service -n 120 --no-pager || true
+	  exit 1
+	fi
+	for _ in \$(seq 1 20); do
+	  if systemctl is-active --quiet tgvpn-subscription.service \
+	    && grep -q '^VLESS_TYPE=ws$' "\$server_dir/.env.subscription"; then
+	    break
+	  fi
+	  sleep 1
+	done
 
-echo "server2 subscription deployed"
+	echo "server2 subscription deployed"
 if [[ -n "\$origin_secret" ]]; then
   echo "origin secret saved at /root/tgvpn-origin-secret.txt"
 else

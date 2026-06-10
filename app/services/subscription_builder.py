@@ -222,6 +222,11 @@ def build_main_xray_outbound(user: SnapshotUser, profile: SubscriptionProfile, *
             "host": profile.vless_sni or profile.vless_public_host,
             "mode": "auto",
         }
+    elif profile.vless_type == "ws":
+        stream_settings["wsSettings"] = {
+            "path": profile.vless_path or "/",
+            "headers": {"Host": profile.vless_sni or profile.vless_public_host},
+        }
 
     if profile.vless_security == "tls":
         stream_settings["tlsSettings"] = {

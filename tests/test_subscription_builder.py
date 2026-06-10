@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 import asyncio
 import json
+from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
@@ -263,6 +264,55 @@ def test_xray_json_response_builds_main_only_profile_without_whitelist_fetch() -
     assert config["routing"]["rules"][-1] == {"network": "tcp,udp", "outboundTag": "proxy"}
 
 
+def test_xray_json_response_supports_vless_ws_tls_profile() -> None:
+    snapshot = {
+        "users": {
+            "tok": {
+                "telegram_id": 123,
+                "uuid": "00000000-0000-0000-0000-000000000001",
+                "main_vpn_active": True,
+                "whitelist_enabled": False,
+                "expire": 1781259930,
+            }
+        }
+    }
+    base_profile = _profile()
+    profile = replace(
+        base_profile,
+        vless_public_host="abc.trycloudflare.com",
+        vless_public_port=443,
+        vless_security="tls",
+        vless_type="ws",
+        vless_sni="abc.trycloudflare.com",
+        vless_flow="",
+        vless_pbk="",
+        vless_sid="",
+        vless_path="/kvpn-ws",
+    )
+
+    response = build_xray_json_subscription_response(
+        snapshot=snapshot,
+        product="kVPN",
+        token="tok",
+        profile=profile,
+        whitelist_profile=None,
+    )
+
+    assert response is not None
+    config = json.loads(response.body)[0]
+    outbound = config["outbounds"][0]
+    assert outbound["settings"]["vnext"][0]["address"] == "abc.trycloudflare.com"
+    assert outbound["settings"]["vnext"][0]["port"] == 443
+    assert "flow" not in outbound["settings"]["vnext"][0]["users"][0]
+    assert outbound["streamSettings"]["network"] == "ws"
+    assert outbound["streamSettings"]["security"] == "tls"
+    assert outbound["streamSettings"]["wsSettings"] == {
+        "path": "/kvpn-ws",
+        "headers": {"Host": "abc.trycloudflare.com"},
+    }
+    assert outbound["streamSettings"]["tlsSettings"]["serverName"] == "abc.trycloudflare.com"
+
+
 def test_xray_json_response_returns_empty_profile_list_without_entitlements() -> None:
     snapshot = {
         "users": {
@@ -461,6 +511,12 @@ def test_server2_xray_api_config_preserves_old_chain_client() -> None:
     upstream = next(inbound for inbound in config["inbounds"] if inbound["tag"] == "upstream-in")
     assert upstream["settings"]["clients"][0]["email"] == "old-server@chain.local"
     assert "yandex.ru" in upstream["streamSettings"]["realitySettings"]["serverNames"]
+    cdn_ws = next(inbound for inbound in config["inbounds"] if inbound["tag"] == "cdn-ws-in")
+    assert cdn_ws["listen"] == "127.0.0.1"
+    assert cdn_ws["port"] == 10086
+    assert cdn_ws["streamSettings"]["network"] == "ws"
+    assert cdn_ws["streamSettings"]["wsSettings"]["path"] == "/kvpn-ws"
+    assert "flow" not in cdn_ws["settings"]["clients"][0]
     assert any(inbound["tag"] == "api" for inbound in config["inbounds"])
     assert config["routing"]["rules"][0] == {"type": "field", "inboundTag": ["api"], "outboundTag": "api"}
 
@@ -498,6 +554,43 @@ def test_remote_reconcile_config_is_idempotent_and_preserves_unmanaged_clients()
     assert config["inbounds"][0]["settings"]["clients"] == [
         {"id": "old-chain-id", "email": "old-server@chain.local"},
         {"id": "active-id", "email": "user-2@vpn.local", "flow": "xtls-rprx-vision"},
+    ]
+
+
+def test_remote_reconcile_syncs_cdn_ws_inbound_without_flow() -> None:
+    config = {
+        "inbounds": [
+            {
+                "tag": "upstream-in",
+                "settings": {"clients": []},
+            },
+            {
+                "tag": "cdn-ws-in",
+                "settings": {"clients": [{"id": "stale-id", "email": "user-1@vpn.local", "flow": "bad"}]},
+            },
+        ]
+    }
+
+    changed_main = sync_managed_clients_in_config(
+        config,
+        inbound_tag="upstream-in",
+        expected={"user-2@vpn.local": "active-id"},
+        flow="xtls-rprx-vision",
+    )
+    changed_cdn = sync_managed_clients_in_config(
+        config,
+        inbound_tag="cdn-ws-in",
+        expected={"user-2@vpn.local": "active-id"},
+        flow="",
+    )
+
+    assert changed_main is True
+    assert changed_cdn is True
+    assert config["inbounds"][0]["settings"]["clients"] == [
+        {"id": "active-id", "email": "user-2@vpn.local", "flow": "xtls-rprx-vision"},
+    ]
+    assert config["inbounds"][1]["settings"]["clients"] == [
+        {"id": "active-id", "email": "user-2@vpn.local"},
     ]
 
 

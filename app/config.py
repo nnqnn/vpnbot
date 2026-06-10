@@ -45,6 +45,7 @@ class Settings(BaseSettings):
     xray_control_mode: str = Field(default="config", alias="XRAY_CONTROL_MODE")
     xray_config_path: Path = Field(default=Path("/usr/local/etc/xray/config.json"), alias="XRAY_CONFIG_PATH")
     xray_inbound_tag: str = Field(default="vless-in", alias="XRAY_INBOUND_TAG")
+    xray_extra_inbound_tags: str = Field(default="", alias="XRAY_EXTRA_INBOUND_TAGS")
     xray_reload_command: str = Field(default="systemctl reload xray", alias="XRAY_RELOAD_COMMAND")
     xray_restart_command: str = Field(default="systemctl restart xray", alias="XRAY_RESTART_COMMAND")
     xray_access_log_path: Path = Field(default=Path("/var/log/xray/access.log"), alias="XRAY_ACCESS_LOG_PATH")

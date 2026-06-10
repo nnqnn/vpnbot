@@ -49,7 +49,8 @@ class XrayService:
         email = self.user_email(telegram_id)
         if self._is_api_mode():
             async with self._lock:
-                await self._add_user_via_api_unlocked(email=email, user_uuid=user_uuid)
+                for inbound_tag in self._managed_inbound_tags():
+                    await self._add_user_via_api_unlocked(email=email, user_uuid=user_uuid, inbound_tag=inbound_tag)
                 if self._is_ssh_api_mode():
                     await self._persist_remote_config_upsert_unlocked(email=email, user_uuid=user_uuid)
             return
@@ -59,7 +60,8 @@ class XrayService:
         email = self.user_email(telegram_id)
         if self._is_api_mode():
             async with self._lock:
-                await self._remove_user_via_api_unlocked(email=email)
+                for inbound_tag in self._managed_inbound_tags():
+                    await self._remove_user_via_api_unlocked(email=email, inbound_tag=inbound_tag)
                 if self._is_ssh_api_mode():
                     await self._persist_remote_config_remove_unlocked(email=email)
             return
@@ -131,9 +133,11 @@ class XrayService:
                 await self._sync_enabled_users_remote_helper_unlocked(expected_by_email, managed_emails)
                 return
             for email in to_remove:
-                await self._remove_user_via_api_unlocked(email=email)
+                for inbound_tag in self._managed_inbound_tags():
+                    await self._remove_user_via_api_unlocked(email=email, inbound_tag=inbound_tag)
             for email, user_uuid in expected_by_email.items():
-                await self._add_user_via_api_unlocked(email=email, user_uuid=user_uuid)
+                for inbound_tag in self._managed_inbound_tags():
+                    await self._add_user_via_api_unlocked(email=email, user_uuid=user_uuid, inbound_tag=inbound_tag)
 
     async def get_user_traffic(self, telegram_id: int) -> tuple[int, int] | None:
         if not self.settings.xray_api_enabled:
@@ -256,20 +260,34 @@ class XrayService:
         async with self._lock:
             await self._add_user_via_api_unlocked(email=email, user_uuid=user_uuid)
 
-    async def _add_user_via_api_unlocked(self, email: str, user_uuid: str) -> None:
+    async def _add_user_via_api_unlocked(
+        self,
+        email: str,
+        user_uuid: str,
+        inbound_tag: str | None = None,
+    ) -> None:
+        inbound_tag = inbound_tag or self.settings.xray_inbound_tag
         config = await self._read_config_async()
-        payload = self._build_adu_payload_from_config(config, email, user_uuid)
+        payload = self._build_adu_payload_from_config(config, email, user_uuid, inbound_tag=inbound_tag)
         code, stdout, stderr = await self._run_adu_with_payload(payload)
         if code == 0 and self._adu_added_users_count(stdout) > 0:
             return
         if self._looks_like_user_exists_error(stdout, stderr):
-            runtime_code, runtime_stdout, runtime_stderr = await self._get_user_via_api_unlocked(email=email)
-            if runtime_code == 0 and self._runtime_user_matches(runtime_stdout, email=email, user_uuid=user_uuid):
+            runtime_code, runtime_stdout, runtime_stderr = await self._get_user_via_api_unlocked(
+                email=email,
+                inbound_tag=inbound_tag,
+            )
+            if runtime_code == 0 and self._runtime_user_matches(
+                runtime_stdout,
+                email=email,
+                user_uuid=user_uuid,
+                flow=self._flow_for_inbound_tag(inbound_tag),
+            ):
                 logger.debug("Xray API user already present with expected UUID: %s", email)
                 return
 
             logger.warning("Xray API user exists, replacing runtime user: %s", email)
-            await self._remove_user_via_api_unlocked(email=email)
+            await self._remove_user_via_api_unlocked(email=email, inbound_tag=inbound_tag)
             retry_code, retry_stdout, retry_stderr = await self._run_adu_with_payload(payload)
             if retry_code == 0 and self._adu_added_users_count(retry_stdout) > 0:
                 return
@@ -299,6 +317,7 @@ class XrayService:
             "command_timeout_seconds": self.settings.xray_remote_command_timeout_seconds,
             "xray_config_path": str(self.settings.xray_config_path),
             "xray_inbound_tag": self.settings.xray_inbound_tag,
+            "xray_extra_inbound_tags": self._extra_inbound_tags(),
             "vless_flow": self.settings.vless_flow,
             "expected": expected_by_email,
             "managed_emails": managed_emails,
@@ -337,19 +356,29 @@ class XrayService:
             await asyncio.to_thread(self._safe_unlink, config_file)
         return code, stdout, stderr
 
-    def _build_adu_payload_from_config(self, config: dict[str, Any], email: str, user_uuid: str) -> dict[str, Any]:
-        inbound = copy.deepcopy(self._find_inbound(config))
+    def _build_adu_payload_from_config(
+        self,
+        config: dict[str, Any],
+        email: str,
+        user_uuid: str,
+        inbound_tag: str | None = None,
+    ) -> dict[str, Any]:
+        inbound_tag = inbound_tag or self.settings.xray_inbound_tag
+        inbound = copy.deepcopy(self._find_inbound(config, inbound_tag=inbound_tag))
         inbound.setdefault("settings", {})
-        inbound["settings"]["clients"] = [self._build_client(user_uuid=user_uuid, email=email)]
+        inbound["settings"]["clients"] = [
+            self._build_client(user_uuid=user_uuid, email=email, flow=self._flow_for_inbound_tag(inbound_tag))
+        ]
         return {"inbounds": [inbound]}
 
     async def _remove_user_via_api(self, email: str) -> None:
         async with self._lock:
             await self._remove_user_via_api_unlocked(email=email)
 
-    async def _remove_user_via_api_unlocked(self, email: str) -> None:
+    async def _remove_user_via_api_unlocked(self, email: str, inbound_tag: str | None = None) -> None:
+        inbound_tag = inbound_tag or self.settings.xray_inbound_tag
         code, stdout, stderr = await self._run_args_command(
-            self._api_command("rmu") + [f"-tag={self.settings.xray_inbound_tag}", email]
+            self._api_command("rmu") + [f"-tag={inbound_tag}", email]
         )
         if code == 0:
             return
@@ -359,16 +388,18 @@ class XrayService:
         logger.error("Xray API remove user failed (%s): %s", code, stderr.strip() or stdout.strip())
         raise RuntimeError("Failed to remove user via Xray API")
 
-    async def _get_user_via_api_unlocked(self, email: str) -> tuple[int, str, str]:
+    async def _get_user_via_api_unlocked(self, email: str, inbound_tag: str | None = None) -> tuple[int, str, str]:
+        inbound_tag = inbound_tag or self.settings.xray_inbound_tag
         return await self._run_args_command(
             self._api_command("inbounduser")
-            + [f"-tag={self.settings.xray_inbound_tag}", f"-email={email}", "--json"]
+            + [f"-tag={inbound_tag}", f"-email={email}", "--json"]
         )
 
-    def _build_client(self, user_uuid: str, email: str) -> dict[str, Any]:
+    def _build_client(self, user_uuid: str, email: str, flow: str | None = None) -> dict[str, Any]:
         data: dict[str, Any] = {"id": str(user_uuid), "email": email}
-        if self.settings.vless_flow:
-            data["flow"] = self.settings.vless_flow
+        client_flow = self.settings.vless_flow if flow is None else flow
+        if client_flow:
+            data["flow"] = client_flow
         return data
 
     def _read_config(self) -> dict[str, Any]:
@@ -423,34 +454,65 @@ class XrayService:
             await self._run_remote_shell_command(f"rm -f {shlex.quote(remote_tmp)}")
             await asyncio.to_thread(self._safe_unlink, config_file)
 
-    def _find_inbound(self, config: dict[str, Any]) -> dict[str, Any]:
+    def _find_inbound(self, config: dict[str, Any], inbound_tag: str | None = None) -> dict[str, Any]:
+        inbound_tag = inbound_tag or self.settings.xray_inbound_tag
         inbounds = config.get("inbounds")
         if not isinstance(inbounds, list):
             raise ValueError("Invalid Xray config: inbounds is missing")
         for inbound in inbounds:
-            if inbound.get("tag") == self.settings.xray_inbound_tag:
+            if inbound.get("tag") == inbound_tag:
                 return inbound
-        raise ValueError(f"Inbound tag '{self.settings.xray_inbound_tag}' was not found")
+        raise ValueError(f"Inbound tag '{inbound_tag}' was not found")
 
     async def _persist_remote_config_upsert_unlocked(self, email: str, user_uuid: str) -> None:
         config = await self._read_config_async()
-        if self._upsert_managed_client_in_config(config, email=email, user_uuid=user_uuid):
+        changed = False
+        for inbound_tag in self._managed_inbound_tags():
+            changed = self._upsert_managed_client_in_config(
+                config,
+                email=email,
+                user_uuid=user_uuid,
+                inbound_tag=inbound_tag,
+            ) or changed
+        if changed:
             await self._write_config_async(config)
 
     async def _persist_remote_config_remove_unlocked(self, email: str) -> None:
         config = await self._read_config_async()
-        if self._remove_managed_client_from_config(config, email=email):
+        changed = False
+        for inbound_tag in self._managed_inbound_tags():
+            changed = self._remove_managed_client_from_config(
+                config,
+                email=email,
+                inbound_tag=inbound_tag,
+            ) or changed
+        if changed:
             await self._write_config_async(config)
 
     async def _persist_remote_config_sync_unlocked(self, expected_by_email: dict[str, str]) -> None:
         config = await self._read_config_async()
-        if self._sync_managed_clients_in_config(config, expected_by_email):
+        changed = False
+        for inbound_tag in self._managed_inbound_tags():
+            changed = self._sync_managed_clients_in_config(
+                config,
+                expected_by_email,
+                inbound_tag=inbound_tag,
+            ) or changed
+        if changed:
             await self._write_config_async(config)
 
-    def _upsert_managed_client_in_config(self, config: dict[str, Any], *, email: str, user_uuid: str) -> bool:
-        inbound = self._find_inbound(config)
+    def _upsert_managed_client_in_config(
+        self,
+        config: dict[str, Any],
+        *,
+        email: str,
+        user_uuid: str,
+        inbound_tag: str | None = None,
+    ) -> bool:
+        inbound_tag = inbound_tag or self.settings.xray_inbound_tag
+        inbound = self._find_inbound(config, inbound_tag=inbound_tag)
         clients: list[dict[str, Any]] = inbound.setdefault("settings", {}).setdefault("clients", [])
-        next_client = self._build_client(user_uuid=user_uuid, email=email)
+        next_client = self._build_client(user_uuid=user_uuid, email=email, flow=self._flow_for_inbound_tag(inbound_tag))
         for index, client in enumerate(clients):
             if client.get("email") == email:
                 if client == next_client:
@@ -460,8 +522,14 @@ class XrayService:
         clients.append(next_client)
         return True
 
-    def _remove_managed_client_from_config(self, config: dict[str, Any], *, email: str) -> bool:
-        inbound = self._find_inbound(config)
+    def _remove_managed_client_from_config(
+        self,
+        config: dict[str, Any],
+        *,
+        email: str,
+        inbound_tag: str | None = None,
+    ) -> bool:
+        inbound = self._find_inbound(config, inbound_tag=inbound_tag)
         clients: list[dict[str, Any]] = inbound.setdefault("settings", {}).setdefault("clients", [])
         updated = [client for client in clients if client.get("email") != email]
         if len(updated) == len(clients):
@@ -469,8 +537,14 @@ class XrayService:
         inbound["settings"]["clients"] = updated
         return True
 
-    def _sync_managed_clients_in_config(self, config: dict[str, Any], expected_by_email: dict[str, str]) -> bool:
-        inbound = self._find_inbound(config)
+    def _sync_managed_clients_in_config(
+        self,
+        config: dict[str, Any],
+        expected_by_email: dict[str, str],
+        inbound_tag: str | None = None,
+    ) -> bool:
+        inbound_tag = inbound_tag or self.settings.xray_inbound_tag
+        inbound = self._find_inbound(config, inbound_tag=inbound_tag)
         clients: list[dict[str, Any]] = inbound.setdefault("settings", {}).setdefault("clients", [])
         non_managed_clients = [
             client
@@ -478,7 +552,11 @@ class XrayService:
             if not self._is_managed_email(client.get("email") if isinstance(client, dict) else None)
         ]
         expected_clients = [
-            self._build_client(user_uuid=expected_by_email[email], email=email)
+            self._build_client(
+                user_uuid=expected_by_email[email],
+                email=email,
+                flow=self._flow_for_inbound_tag(inbound_tag),
+            )
             for email in sorted(expected_by_email)
         ]
         updated = non_managed_clients + expected_clients
@@ -525,14 +603,22 @@ class XrayService:
         text = f"{stdout}\n{stderr}".lower()
         return "not found" in text
 
-    def _runtime_user_matches(self, stdout: str, *, email: str, user_uuid: str) -> bool:
+    def _runtime_user_matches(
+        self,
+        stdout: str,
+        *,
+        email: str,
+        user_uuid: str,
+        flow: str | None = None,
+    ) -> bool:
         try:
             normalized = json.dumps(json.loads(stdout), ensure_ascii=False, separators=(",", ":"))
         except json.JSONDecodeError:
             normalized = stdout
         if email not in normalized or str(user_uuid) not in normalized:
             return False
-        if self.settings.vless_flow and '"flow"' in normalized and self.settings.vless_flow not in normalized:
+        expected_flow = self.settings.vless_flow if flow is None else flow
+        if expected_flow and '"flow"' in normalized and expected_flow not in normalized:
             return False
         return True
 
@@ -551,6 +637,20 @@ class XrayService:
 
     def _is_ssh_api_mode(self) -> bool:
         return self.settings.xray_control_mode.strip().lower() in {"ssh_api", "remote_api"}
+
+    def _extra_inbound_tags(self) -> list[str]:
+        raw_value = getattr(self.settings, "xray_extra_inbound_tags", "")
+        return [tag.strip() for tag in str(raw_value).split(",") if tag.strip()]
+
+    def _managed_inbound_tags(self) -> list[str]:
+        tags = [self.settings.xray_inbound_tag]
+        for tag in self._extra_inbound_tags():
+            if tag not in tags:
+                tags.append(tag)
+        return tags
+
+    def _flow_for_inbound_tag(self, inbound_tag: str) -> str:
+        return self.settings.vless_flow if inbound_tag == self.settings.xray_inbound_tag else ""
 
     @staticmethod
     def _write_temp_json(payload: dict[str, Any]) -> str:

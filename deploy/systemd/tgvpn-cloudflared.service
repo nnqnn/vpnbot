@@ -1,0 +1,22 @@
+[Unit]
+Description=Telegram VPN Cloudflare Quick Tunnel
+After=network-online.target xray.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+Group=root
+Environment=CLOUDFLARED_ORIGIN_URL=http://127.0.0.1:10086
+Environment=CLOUDFLARED_URL_FILE=/var/lib/tgvpn/cloudflared_quick_url
+Environment=SUBSCRIPTION_ENV_FILE=/home/tgvpn/.env.subscription
+Environment=SUBSCRIPTION_SERVICE=tgvpn-subscription.service
+Environment=VLESS_PATH=/kvpn-ws
+ExecStart=/home/tgvpn/scripts/run_cloudflared_quick_tunnel.sh
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

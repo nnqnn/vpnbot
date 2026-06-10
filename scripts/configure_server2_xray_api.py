@@ -15,6 +15,9 @@ def main() -> None:
     parser.add_argument("--api-port", type=int, default=10085)
     parser.add_argument("--inbound-tag", default="upstream-in")
     parser.add_argument("--direct-port", type=int, default=9443)
+    parser.add_argument("--cdn-ws-inbound-tag", default="cdn-ws-in")
+    parser.add_argument("--cdn-ws-port", type=int, default=10086)
+    parser.add_argument("--cdn-ws-path", default="/kvpn-ws")
     parser.add_argument("--server-name", action="append", default=["www.cloudflare.com", "yandex.ru"])
     parser.add_argument("--short-id", default="a1b2c3d4e5f6a7b8")
     parser.add_argument("--flow", default="xtls-rprx-vision")
@@ -28,6 +31,9 @@ def main() -> None:
         api_port=args.api_port,
         inbound_tag=args.inbound_tag,
         direct_port=args.direct_port,
+        cdn_ws_inbound_tag=args.cdn_ws_inbound_tag,
+        cdn_ws_port=args.cdn_ws_port,
+        cdn_ws_path=args.cdn_ws_path,
         server_names=args.server_name,
         short_id=args.short_id,
         flow=args.flow,
@@ -52,6 +58,9 @@ def ensure_xray_api(
     api_port: int,
     inbound_tag: str = "upstream-in",
     direct_port: int = 9443,
+    cdn_ws_inbound_tag: str = "cdn-ws-in",
+    cdn_ws_port: int = 10086,
+    cdn_ws_path: str = "/kvpn-ws",
     server_names: list[str] | None = None,
     short_id: str = "a1b2c3d4e5f6a7b8",
     flow: str = "xtls-rprx-vision",
@@ -67,6 +76,13 @@ def ensure_xray_api(
         short_id=short_id,
         flow=flow,
         private_key=private_key,
+    ) or changed
+    changed = ensure_cdn_vless_ws_inbound(
+        data,
+        source_inbound_tag=inbound_tag,
+        inbound_tag=cdn_ws_inbound_tag,
+        port=cdn_ws_port,
+        path=cdn_ws_path,
     ) or changed
 
     api = data.setdefault("api", {})
@@ -115,6 +131,82 @@ def ensure_xray_api(
             changed = True
 
     return changed
+
+
+def ensure_cdn_vless_ws_inbound(
+    data: dict[str, Any],
+    *,
+    source_inbound_tag: str,
+    inbound_tag: str,
+    port: int,
+    path: str,
+) -> bool:
+    changed = False
+    inbounds = data.setdefault("inbounds", [])
+    inbound = _find_by_tag(inbounds, inbound_tag)
+    source = _find_by_tag(inbounds, source_inbound_tag)
+    source_clients = []
+    if source is not None:
+        source_clients = source.get("settings", {}).get("clients", [])
+        if not isinstance(source_clients, list):
+            source_clients = []
+
+    expected = {
+        "tag": inbound_tag,
+        "listen": "127.0.0.1",
+        "port": port,
+        "protocol": "vless",
+        "settings": {
+            "decryption": "none",
+            "clients": [
+                _client_without_flow(client)
+                for client in source_clients
+                if isinstance(client, dict)
+            ],
+        },
+        "streamSettings": {
+            "network": "ws",
+            "security": "none",
+            "wsSettings": {
+                "path": path,
+            },
+        },
+    }
+
+    if inbound is None:
+        inbounds.append(expected)
+        return True
+
+    for key in ("tag", "listen", "port", "protocol"):
+        if inbound.get(key) != expected[key]:
+            inbound[key] = expected[key]
+            changed = True
+
+    settings = inbound.setdefault("settings", {})
+    if settings.get("decryption") != "none":
+        settings["decryption"] = "none"
+        changed = True
+    clients = settings.setdefault("clients", [])
+    if not isinstance(clients, list):
+        settings["clients"] = []
+        changed = True
+    else:
+        for client in clients:
+            if isinstance(client, dict) and "flow" in client:
+                client.pop("flow", None)
+                changed = True
+
+    stream = inbound.setdefault("streamSettings", {})
+    expected_stream = expected["streamSettings"]
+    if _merge_dict(stream, expected_stream):
+        changed = True
+    return changed
+
+
+def _client_without_flow(client: dict[str, Any]) -> dict[str, Any]:
+    data = dict(client)
+    data.pop("flow", None)
+    return data
 
 
 def remove_conflicting_public_migrate_inbound(data: dict[str, Any], *, keep_tag: str) -> bool:

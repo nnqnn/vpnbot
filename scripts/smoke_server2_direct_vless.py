@@ -129,6 +129,16 @@ def build_client_config(user: dict[str, Any], env: dict[str, str], *, socks_port
     }
     if stream["network"] == "tcp":
         stream["tcpSettings"] = {}
+    if stream["network"] == "ws":
+        stream["wsSettings"] = {
+            "path": env.get("VLESS_PATH") or "/",
+            "headers": {"Host": env.get("VLESS_SNI") or env["VLESS_PUBLIC_HOST"]},
+        }
+    if stream["security"] == "tls":
+        stream["tlsSettings"] = {
+            "serverName": env.get("VLESS_SNI") or env["VLESS_PUBLIC_HOST"],
+            "fingerprint": env.get("VLESS_FP") or "chrome",
+        }
     if stream["security"] == "reality":
         stream["realitySettings"] = {
             "serverName": env.get("VLESS_SNI") or env["VLESS_PUBLIC_HOST"],

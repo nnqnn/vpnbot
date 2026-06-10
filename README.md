@@ -422,8 +422,9 @@ sudo systemctl restart tgvpn-bot
 
 ```text
 Bot/PostgreSQL на server #1 -> snapshot + Xray API по SSH -> server #2
-Пользователь -> vpn.nnqnn.tech Worker -> s2.nnqnn.tech HTTPS endpoint
-Пользовательский VLESS Reality -> s2.nnqnn.tech:443 -> nginx stream -> Xray:9443
+Пользователь -> s2.nnqnn.tech HTTPS endpoint -> персональная Happ-подписка
+Основной VPN для РФ -> Cloudflare Quick Tunnel -> Xray cdn-ws-in:10086
+Direct fallback -> s2.nnqnn.tech:443 -> nginx stream -> Xray upstream-in:9443
 ```
 
 Server #1 Xray/Apache не нужны для новой подписки и не меняются. Старая цепочка может работать параллельно.
@@ -433,6 +434,7 @@ Server #1 Xray/Apache не нужны для новой подписки и не
 ```bash
 XRAY_CONTROL_MODE=ssh_api
 XRAY_INBOUND_TAG=upstream-in
+XRAY_EXTRA_INBOUND_TAGS=cdn-ws-in
 XRAY_CONFIG_PATH=/usr/local/etc/xray/config.json
 XRAY_API_ENABLED=true
 XRAY_API_SERVER=127.0.0.1:10085
@@ -442,11 +444,13 @@ XRAY_REMOTE_PORT=22
 XRAY_REMOTE_KEY_PATH=
 XRAY_REMOTE_PASSWORD=SERVER2_ROOT_PASSWORD_OR_EMPTY_IF_KEY_AUTH
 
-VLESS_PUBLIC_HOST=s2.nnqnn.tech
+VLESS_PUBLIC_HOST=CURRENT_TRYCLOUDFLARE_HOST
 VLESS_PUBLIC_PORT=443
-VLESS_SNI=yandex.ru
-VLESS_PBK=SERVER2_REALITY_PUBLIC_KEY
-VLESS_SID=a1b2c3d4e5f6a7b8
+VLESS_SECURITY=tls
+VLESS_TYPE=ws
+VLESS_SNI=CURRENT_TRYCLOUDFLARE_HOST
+VLESS_FLOW=
+VLESS_PATH=/kvpn-ws
 
 SUBSCRIPTION_PUBLIC_BASE_URL=https://s2.nnqnn.tech
 SUBSCRIPTION_LINKS_ENABLED=true
@@ -468,6 +472,8 @@ scripts/deploy_server2_subscription.sh
 ```
 
 Для HTTPS origin используйте `deploy/nginx/s2.nnqnn.tech.conf`. DNS `s2.nnqnn.tech` должен быть DNS-only A record на `89.125.50.96`. Deploy настраивает nginx stream: SNI `s2.nnqnn.tech` уходит в локальный HTTPS backend, остальной TLS-трафик на `443` уходит в Xray `9443`.
+
+Cloudflare Quick Tunnel поднимается systemd unit `tgvpn-cloudflared.service`. Он записывает текущий `trycloudflare.com` host в `/var/lib/tgvpn/cloudflared_quick_url` и обновляет `/home/tgvpn/.env.subscription`; подписка начинает выдавать основной профиль `VLESS + WebSocket + TLS` через Cloudflare.
 
 Worker для `vpn.nnqnn.tech` лежит в `deploy/cloudflare/vpn-nnqnn-worker.js`. Secret `ORIGIN_SECRET` в Worker должен совпадать с `SUBSCRIPTION_ORIGIN_SECRET` на server #2. Worker обслуживает:
 - `/sub/kVPN/<token>`: прокси к server #2 origin;
