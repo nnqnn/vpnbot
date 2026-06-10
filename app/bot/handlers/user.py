@@ -108,11 +108,11 @@ def _build_vpn_access_text(
         f"Основной VPN: <b>{main_status}</b>\n"
         f"Обход белых списков: <b>{whitelist_status}</b>\n\n"
         "Для подключения установите Happ: https://happ.su\n\n"
-        "И перейдите по ссылке ниже:\n"
-        f"{escape(happ_open_url)}\n\n\n\n"
-        "Если приложение не открылось автоматически, импортируйте ссылку вручную (скопируйте ссылку и вставьте в Happ):\n"
+        "Откройте ссылку для добавления в Happ:\n"
+        f"{escape(happ_open_url)}\n\n"
+        "Ручной импорт, если Happ не открылся:\n"
         f"{escape(https_link)}\n\n"
-        "Подписка обновляется автоматически."
+        "Подписка обновляется автоматически.\n"
         "Доп. инструкция: https://t.me/kvpn_public/2\n\n"
         f"Техническая поддержка, если необходима помощь: {settings.support_url}"
     )
@@ -121,8 +121,7 @@ def _build_vpn_access_text(
 def _build_raw_vless_access_text(*, settings: Settings, link: str) -> str:
     return (
         "🔐 <b>Мой VPN</b>\n\n"
-        "Для простого подключения на любом устройстве скачайте "
-        "<a href=\"https://happ.su\">Happ</a>.\n\n"
+        "Для простого подключения на любом устройстве скачайте Happ: https://happ.su\n\n"
         "<b>Инструкция по подключению:</b>\n"
         "1) Скопируйте ваш VPN-ключ целиком (текст ниже).\n"
         "2) Откройте Happ.\n"
@@ -132,7 +131,7 @@ def _build_raw_vless_access_text(*, settings: Settings, link: str) -> str:
         "Ваш VPN-ключ:\n"
         f"<code>{escape(link)}</code>\n\n"
         "Если вы используете другое приложение, можно подключиться этим же ключом.\n\n"
-        "Доп. инструкция: https://t.me/kvpnpublic/2\n\n"
+        "Доп. инструкция: https://t.me/kvpn_public/2\n\n"
         f"Техническая поддержка, если необходима помощь: {settings.support_url}"
     )
 

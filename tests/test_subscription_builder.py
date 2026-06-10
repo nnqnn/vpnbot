@@ -493,6 +493,7 @@ def test_bot_vpn_access_text_contains_happ_and_https_links() -> None:
     assert "https://vpn.nnqnn.tech/sub/kVPN/abc" in text
     assert "<code>https://vpn.nnqnn.tech/sub/kVPN/abc</code>" not in text
     assert '<a href="https://vpn.nnqnn.tech/sub/kVPN/abc">' not in text
+    assert "Подписка обновляется автоматически.\nДоп. инструкция" in text
     assert "Основной VPN: <b>активен до 10.06.2026 10:00</b>" in text
     assert "Обход белых списков: <b>доступен</b>" in text
 
@@ -504,6 +505,8 @@ def test_bot_raw_vless_access_text_keeps_legacy_key_format() -> None:
     text = _build_raw_vless_access_text(settings=settings, link=link)
 
     assert f"<code>{link}</code>" in text
+    assert '<a href="https://happ.su">' not in text
+    assert "https://t.me/kvpn_public/2" in text
     assert "Ваш VPN-ключ" in text
 
 
