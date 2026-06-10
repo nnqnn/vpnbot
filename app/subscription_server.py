@@ -64,6 +64,16 @@ class RuntimeConfig:
             vless_header_type=_env("VLESS_HEADER_TYPE", ""),
             vless_remark_prefix=_env("VLESS_REMARK_PREFIX", "kVPN"),
             whitelist_max_nodes=int(_env("WHITELIST_MAX_NODES", "300")),
+            fallback_vless_public_host=_env("VLESS_FALLBACK_PUBLIC_HOST", ""),
+            fallback_vless_public_port=int(_env("VLESS_FALLBACK_PUBLIC_PORT", "443")),
+            fallback_vless_security=_env("VLESS_FALLBACK_SECURITY", "reality"),
+            fallback_vless_type=_env("VLESS_FALLBACK_TYPE", "tcp"),
+            fallback_vless_sni=_env("VLESS_FALLBACK_SNI", "yandex.ru"),
+            fallback_vless_flow=_env("VLESS_FALLBACK_FLOW", "xtls-rprx-vision"),
+            fallback_vless_fp=_env("VLESS_FALLBACK_FP", "chrome"),
+            fallback_vless_pbk=_env("VLESS_FALLBACK_PBK", ""),
+            fallback_vless_sid=_env("VLESS_FALLBACK_SID", "a1b2c3d4e5f6a7b8"),
+            fallback_vless_path=_env("VLESS_FALLBACK_PATH", ""),
         )
 
 

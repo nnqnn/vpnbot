@@ -314,6 +314,64 @@ def test_xray_json_response_supports_vless_ws_tls_profile() -> None:
     assert outbound["streamSettings"]["tlsSettings"]["serverName"] == "abc.trycloudflare.com"
 
 
+def test_xray_json_main_profile_can_include_direct_reality_fallback() -> None:
+    snapshot = {
+        "users": {
+            "tok": {
+                "telegram_id": 123,
+                "uuid": "00000000-0000-0000-0000-000000000001",
+                "main_vpn_active": True,
+                "whitelist_enabled": False,
+                "expire": 1781259930,
+            }
+        }
+    }
+    profile = replace(
+        _profile(),
+        vless_public_host="abc.trycloudflare.com",
+        vless_public_port=443,
+        vless_security="tls",
+        vless_type="ws",
+        vless_sni="abc.trycloudflare.com",
+        vless_flow="",
+        vless_pbk="",
+        vless_sid="",
+        vless_path="/kvpn-ws",
+        fallback_vless_public_host="s2.nnqnn.tech",
+        fallback_vless_public_port=443,
+        fallback_vless_security="reality",
+        fallback_vless_type="tcp",
+        fallback_vless_sni="yandex.ru",
+        fallback_vless_flow="xtls-rprx-vision",
+        fallback_vless_pbk="PUBLIC_KEY",
+        fallback_vless_sid="a1b2c3d4e5f6a7b8",
+    )
+
+    response = build_xray_json_subscription_response(
+        snapshot=snapshot,
+        product="kVPN",
+        token="tok",
+        profile=profile,
+        whitelist_profile=None,
+    )
+
+    assert response is not None
+    config = json.loads(response.body)[0]
+    assert [outbound["tag"] for outbound in config["outbounds"]] == [
+        "proxy-cdn",
+        "proxy-direct",
+        "direct",
+        "block",
+    ]
+    assert config["outbounds"][0]["settings"]["vnext"][0]["address"] == "abc.trycloudflare.com"
+    assert config["outbounds"][1]["settings"]["vnext"][0]["address"] == "s2.nnqnn.tech"
+    assert config["outbounds"][1]["settings"]["vnext"][0]["users"][0]["flow"] == "xtls-rprx-vision"
+    assert config["outbounds"][1]["streamSettings"]["realitySettings"]["serverName"] == "yandex.ru"
+    assert config["routing"]["rules"][-1] == {"network": "tcp,udp", "balancerTag": "proxy-auto"}
+    assert config["routing"]["balancers"][0]["selector"] == ["proxy-cdn", "proxy-direct"]
+    assert config["observatory"]["subjectSelector"] == ["proxy-cdn", "proxy-direct"]
+
+
 def test_xray_json_response_returns_empty_profile_list_without_entitlements() -> None:
     snapshot = {
         "users": {

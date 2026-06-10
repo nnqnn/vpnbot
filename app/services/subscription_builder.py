@@ -31,6 +31,16 @@ class SubscriptionProfile:
     vless_header_type: str
     vless_remark_prefix: str
     whitelist_max_nodes: int
+    fallback_vless_public_host: str = ""
+    fallback_vless_public_port: int = 443
+    fallback_vless_security: str = "reality"
+    fallback_vless_type: str = "tcp"
+    fallback_vless_sni: str = "yandex.ru"
+    fallback_vless_flow: str = "xtls-rprx-vision"
+    fallback_vless_fp: str = "chrome"
+    fallback_vless_pbk: str = ""
+    fallback_vless_sid: str = "a1b2c3d4e5f6a7b8"
+    fallback_vless_path: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -201,45 +211,102 @@ def build_main_vless_node(user: SnapshotUser, profile: SubscriptionProfile) -> s
 
 
 def build_main_xray_outbound(user: SnapshotUser, profile: SubscriptionProfile, *, tag: str = "proxy") -> dict[str, Any]:
+    return _build_vless_xray_outbound(
+        user=user,
+        tag=tag,
+        host=profile.vless_public_host,
+        port=profile.vless_public_port,
+        security=profile.vless_security,
+        transport=profile.vless_type,
+        sni=profile.vless_sni,
+        flow=profile.vless_flow,
+        fp=profile.vless_fp,
+        pbk=profile.vless_pbk,
+        sid=profile.vless_sid,
+        path=profile.vless_path,
+    )
+
+
+def build_fallback_xray_outbound(
+    user: SnapshotUser,
+    profile: SubscriptionProfile,
+    *,
+    tag: str = "proxy-direct",
+) -> dict[str, Any] | None:
+    if not profile.fallback_vless_public_host:
+        return None
+    if profile.fallback_vless_security == "reality" and not profile.fallback_vless_pbk:
+        return None
+    return _build_vless_xray_outbound(
+        user=user,
+        tag=tag,
+        host=profile.fallback_vless_public_host,
+        port=profile.fallback_vless_public_port,
+        security=profile.fallback_vless_security,
+        transport=profile.fallback_vless_type,
+        sni=profile.fallback_vless_sni,
+        flow=profile.fallback_vless_flow,
+        fp=profile.fallback_vless_fp,
+        pbk=profile.fallback_vless_pbk,
+        sid=profile.fallback_vless_sid,
+        path=profile.fallback_vless_path,
+    )
+
+
+def _build_vless_xray_outbound(
+    *,
+    user: SnapshotUser,
+    tag: str,
+    host: str,
+    port: int,
+    security: str,
+    transport: str,
+    sni: str,
+    flow: str,
+    fp: str,
+    pbk: str,
+    sid: str,
+    path: str,
+) -> dict[str, Any]:
     client: dict[str, Any] = {
         "id": user.uuid,
         "encryption": "none",
     }
-    if profile.vless_flow:
-        client["flow"] = profile.vless_flow
+    if flow:
+        client["flow"] = flow
 
     stream_settings: dict[str, Any] = {
-        "network": profile.vless_type,
-        "security": profile.vless_security,
+        "network": transport,
+        "security": security,
     }
-    if profile.vless_type == "tcp":
+    if transport == "tcp":
         stream_settings["tcpSettings"] = {}
-    elif profile.vless_type == "grpc":
-        stream_settings["grpcSettings"] = {"serviceName": profile.vless_path.lstrip("/")}
-    elif profile.vless_type == "xhttp":
+    elif transport == "grpc":
+        stream_settings["grpcSettings"] = {"serviceName": path.lstrip("/")}
+    elif transport == "xhttp":
         stream_settings["xhttpSettings"] = {
-            "path": profile.vless_path or "/",
-            "host": profile.vless_sni or profile.vless_public_host,
+            "path": path or "/",
+            "host": sni or host,
             "mode": "auto",
         }
-    elif profile.vless_type == "ws":
+    elif transport == "ws":
         stream_settings["wsSettings"] = {
-            "path": profile.vless_path or "/",
-            "headers": {"Host": profile.vless_sni or profile.vless_public_host},
+            "path": path or "/",
+            "headers": {"Host": sni or host},
         }
 
-    if profile.vless_security == "tls":
+    if security == "tls":
         stream_settings["tlsSettings"] = {
-            "serverName": profile.vless_sni or profile.vless_public_host,
-            "fingerprint": profile.vless_fp or "chrome",
+            "serverName": sni or host,
+            "fingerprint": fp or "chrome",
         }
-    elif profile.vless_security == "reality":
+    elif security == "reality":
         stream_settings["realitySettings"] = {
             "show": False,
-            "serverName": profile.vless_sni or profile.vless_public_host,
-            "fingerprint": profile.vless_fp or "chrome",
-            "publicKey": profile.vless_pbk,
-            "shortId": profile.vless_sid,
+            "serverName": sni or host,
+            "fingerprint": fp or "chrome",
+            "publicKey": pbk,
+            "shortId": sid,
             "spiderX": "/",
         }
 
@@ -249,8 +316,8 @@ def build_main_xray_outbound(user: SnapshotUser, profile: SubscriptionProfile, *
         "settings": {
             "vnext": [
                 {
-                    "address": profile.vless_public_host,
-                    "port": profile.vless_public_port,
+                    "address": host,
+                    "port": port,
                     "users": [client],
                 }
             ]
@@ -302,11 +369,40 @@ def _build_base_client_config(profile: SubscriptionProfile) -> dict[str, Any]:
 def _build_single_main_config(user: SnapshotUser, profile: SubscriptionProfile) -> dict[str, Any]:
     config = _build_base_client_config(profile)
     config["remarks"] = f"{profile.profile_title} - Основной VPN"
-    config["outbounds"] = [
-        build_main_xray_outbound(user, profile, tag="proxy"),
-        {"tag": "direct", "protocol": "freedom"},
-        {"tag": "block", "protocol": "blackhole"},
-    ]
+    primary_outbound = build_main_xray_outbound(user, profile, tag="proxy")
+    fallback_outbound = build_fallback_xray_outbound(user, profile, tag="proxy-direct")
+    if fallback_outbound is None:
+        config["outbounds"] = [
+            primary_outbound,
+            {"tag": "direct", "protocol": "freedom"},
+            {"tag": "block", "protocol": "blackhole"},
+        ]
+        final_rule = {"network": "tcp,udp", "outboundTag": "proxy"}
+        balancers: list[dict[str, Any]] = []
+    else:
+        primary_outbound["tag"] = "proxy-cdn"
+        config["outbounds"] = [
+            primary_outbound,
+            fallback_outbound,
+            {"tag": "direct", "protocol": "freedom"},
+            {"tag": "block", "protocol": "blackhole"},
+        ]
+        final_rule = {"network": "tcp,udp", "balancerTag": "proxy-auto"}
+        balancers = [
+            {
+                "tag": "proxy-auto",
+                "selector": ["proxy-cdn", "proxy-direct"],
+                "fallbackTag": "proxy-cdn",
+                "strategy": {"type": "leastPing"},
+            }
+        ]
+        config["observatory"] = {
+            "subjectSelector": ["proxy-cdn", "proxy-direct"],
+            "probeUrl": "https://www.gstatic.com/generate_204",
+            "probeInterval": "1m",
+            "enableConcurrency": True,
+        }
+
     config["routing"] = {
         "domainMatcher": "hybrid",
         "domainStrategy": "IPIfNonMatch",
@@ -314,9 +410,11 @@ def _build_single_main_config(user: SnapshotUser, profile: SubscriptionProfile) 
             {"ip": ["geoip:private"], "outboundTag": "direct"},
             {"domain": ["geosite:category-ads-all"], "outboundTag": "block"},
             {"protocol": ["bittorrent"], "outboundTag": "block"},
-            {"network": "tcp,udp", "outboundTag": "proxy"},
+            final_rule,
         ],
     }
+    if balancers:
+        config["routing"]["balancers"] = balancers
     return config
 
 

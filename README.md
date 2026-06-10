@@ -453,6 +453,13 @@ VLESS_TYPE=ws
 VLESS_SNI=CURRENT_TRYCLOUDFLARE_HOST
 VLESS_FLOW=
 VLESS_PATH=/kvpn-ws
+VLESS_FALLBACK_PUBLIC_HOST=s2.nnqnn.tech
+VLESS_FALLBACK_PUBLIC_PORT=443
+VLESS_FALLBACK_SECURITY=reality
+VLESS_FALLBACK_TYPE=tcp
+VLESS_FALLBACK_SNI=yandex.ru
+VLESS_FALLBACK_FLOW=xtls-rprx-vision
+VLESS_FALLBACK_PBK=SERVER2_REALITY_PUBLIC_KEY
 
 SUBSCRIPTION_PUBLIC_BASE_URL=https://s2.nnqnn.tech
 SUBSCRIPTION_LINKS_ENABLED=true
@@ -464,6 +471,7 @@ SUBSCRIPTION_NGINX_HTTPS_BACKEND_PORT=8443
 ```
 
 `SUBSCRIPTION_LINKS_ENABLED=true` включает выдачу Happ-ссылок через `s2.nnqnn.tech`.
+Основной Happ-элемент содержит Cloudflare WS/TLS endpoint и direct Reality fallback. Для РФ основным рабочим путем остается Cloudflare WS/TLS; fallback нужен для сетей, где прямой Reality доступен, и не создает второго элемента в списке Happ.
 
 На server #2:
 

@@ -250,6 +250,16 @@ VLESS_SID=\$profile_sid
 VLESS_PATH=\$profile_path
 VLESS_HEADER_TYPE=
 VLESS_REMARK_PREFIX=kVPN
+VLESS_FALLBACK_PUBLIC_HOST=\$direct_host
+VLESS_FALLBACK_PUBLIC_PORT=\$public_vless_port
+VLESS_FALLBACK_SECURITY=reality
+VLESS_FALLBACK_TYPE=tcp
+VLESS_FALLBACK_SNI=yandex.ru
+VLESS_FALLBACK_FLOW=xtls-rprx-vision
+VLESS_FALLBACK_FP=chrome
+VLESS_FALLBACK_PBK=\$effective_public_key
+VLESS_FALLBACK_SID=a1b2c3d4e5f6a7b8
+VLESS_FALLBACK_PATH=
 SUPPORT_URL=https://t.me/kvpn_public
 WHITELIST_PROFILE_URL=https://vpn.nnqnn.tech/
 WHITELIST_SOURCE_URL=https://raw.githubusercontent.com/zieng2/wl/main/vless_universal.txt
@@ -306,8 +316,12 @@ fi
 	    https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb
 	  DEBIAN_FRONTEND=noninteractive apt-get install -y /tmp/cloudflared-linux-amd64.deb >/dev/null
 	fi
-	systemctl enable --now tgvpn-cloudflared.service
-	systemctl restart tgvpn-cloudflared.service
+	systemctl enable tgvpn-cloudflared.service
+	if systemctl is-active --quiet tgvpn-cloudflared.service && [[ -s /var/lib/tgvpn/cloudflared_quick_url ]]; then
+	  echo "cloudflared quick tunnel is already active; keeping current hostname"
+	else
+	  systemctl restart tgvpn-cloudflared.service
+	fi
 	for _ in \$(seq 1 60); do
 	  if [[ -s /var/lib/tgvpn/cloudflared_quick_url ]]; then
 	    break
