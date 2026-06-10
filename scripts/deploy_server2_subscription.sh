@@ -10,6 +10,9 @@ SERVER2_USER="${SUBSCRIPTION_SERVER2_USER:-root}"
 SERVER2_DIR="${SUBSCRIPTION_SERVER2_DIR:-/home/tgvpn}"
 DIRECT_HOST="${SUBSCRIPTION_DIRECT_HOST:-s2.nnqnn.tech}"
 DIRECT_PORT="${SUBSCRIPTION_DIRECT_PORT:-9443}"
+XHTTP_PORT="${SUBSCRIPTION_XHTTP_PORT:-10087}"
+XHTTP_PATH="${SUBSCRIPTION_XHTTP_PATH:-/kvpn-xhttp}"
+XHTTP_MODE="${SUBSCRIPTION_XHTTP_MODE:-packet-up}"
 PUBLIC_VLESS_PORT="${SUBSCRIPTION_PUBLIC_VLESS_PORT:-443}"
 NGINX_HTTPS_BACKEND_PORT="${SUBSCRIPTION_NGINX_HTTPS_BACKEND_PORT:-8443}"
 SUBSCRIPTION_PORT="${SUBSCRIPTION_LISTEN_PORT:-8088}"
@@ -75,6 +78,9 @@ load_optional_env SUBSCRIPTION_SERVER2_USER
 load_optional_env SUBSCRIPTION_SERVER2_DIR
 load_optional_env SUBSCRIPTION_DIRECT_HOST
 load_optional_env SUBSCRIPTION_DIRECT_PORT
+load_optional_env SUBSCRIPTION_XHTTP_PORT
+load_optional_env SUBSCRIPTION_XHTTP_PATH
+load_optional_env SUBSCRIPTION_XHTTP_MODE
 load_optional_env SUBSCRIPTION_PUBLIC_VLESS_PORT
 load_optional_env SUBSCRIPTION_NGINX_HTTPS_BACKEND_PORT
 load_optional_env LETSENCRYPT_EMAIL
@@ -84,6 +90,9 @@ SERVER2_USER="${SUBSCRIPTION_SERVER2_USER:-$SERVER2_USER}"
 SERVER2_DIR="${SUBSCRIPTION_SERVER2_DIR:-$SERVER2_DIR}"
 DIRECT_HOST="${SUBSCRIPTION_DIRECT_HOST:-$DIRECT_HOST}"
 DIRECT_PORT="${SUBSCRIPTION_DIRECT_PORT:-$DIRECT_PORT}"
+XHTTP_PORT="${SUBSCRIPTION_XHTTP_PORT:-$XHTTP_PORT}"
+XHTTP_PATH="${SUBSCRIPTION_XHTTP_PATH:-$XHTTP_PATH}"
+XHTTP_MODE="${SUBSCRIPTION_XHTTP_MODE:-$XHTTP_MODE}"
 PUBLIC_VLESS_PORT="${SUBSCRIPTION_PUBLIC_VLESS_PORT:-$PUBLIC_VLESS_PORT}"
 NGINX_HTTPS_BACKEND_PORT="${SUBSCRIPTION_NGINX_HTTPS_BACKEND_PORT:-$NGINX_HTTPS_BACKEND_PORT}"
 LETSENCRYPT_EMAIL="${LETSENCRYPT_EMAIL:-$LETSENCRYPT_EMAIL}"
@@ -134,6 +143,9 @@ set -Eeuo pipefail
 server_dir="$SERVER2_DIR"
 direct_host="$DIRECT_HOST"
 direct_port="$DIRECT_PORT"
+xhttp_port="$XHTTP_PORT"
+xhttp_path="$XHTTP_PATH"
+xhttp_mode="$XHTTP_MODE"
 public_vless_port="$PUBLIC_VLESS_PORT"
 subscription_port="$SUBSCRIPTION_PORT"
 origin_secret="$ORIGIN_SECRET"
@@ -147,6 +159,7 @@ tar -xzf /tmp/tgvpn-server2-subscription.tar.gz
 
 apt-get update >/dev/null
 DEBIAN_FRONTEND=noninteractive apt-get install -y python3-httpx python3-dotenv curl >/dev/null
+python3 -m compileall -q app scripts
 
 before_hash="\$(sha256sum "\$xray_config" | awk '{print \$1}')"
 python3 "\$server_dir/scripts/configure_server2_xray_api.py" \
@@ -157,6 +170,10 @@ python3 "\$server_dir/scripts/configure_server2_xray_api.py" \
 	  --cdn-ws-inbound-tag cdn-ws-in \
 	  --cdn-ws-port 10086 \
 	  --cdn-ws-path /kvpn-ws \
+	  --xhttp-inbound-tag xhttp-in \
+	  --xhttp-port "\$xhttp_port" \
+	  --xhttp-path "\$xhttp_path" \
+	  --xhttp-mode "\$xhttp_mode" \
 	  --server-name www.cloudflare.com \
   --server-name yandex.ru \
   --short-id a1b2c3d4e5f6a7b8 \
@@ -192,37 +209,16 @@ if [[ -n "\$public_key" && "\$public_key" != "\$effective_public_key" ]]; then
   echo "WARNING: provided SUBSCRIPTION_SERVER2_VLESS_PBK does not match server2 REALITY private key; using derived public key." >&2
 fi
 
-	tunnel_url_file=/var/lib/tgvpn/cloudflared_quick_url
-	tunnel_host=""
-	if [[ -f "\$tunnel_url_file" ]]; then
-	  tunnel_url="\$(cat "\$tunnel_url_file" || true)"
-	  tunnel_host="\${tunnel_url#https://}"
-	  tunnel_host="\${tunnel_host#http://}"
-	  tunnel_host="\${tunnel_host%%/*}"
-	fi
-	if [[ -n "\$tunnel_host" ]]; then
-	  profile_host="\$tunnel_host"
-	  profile_port=443
-	  profile_security=tls
-	  profile_type=ws
-	  profile_sni="\$tunnel_host"
-	  profile_flow=
-	  profile_fp=chrome
-	  profile_pbk=
-	  profile_sid=
-	  profile_path=/kvpn-ws
-	else
-	  profile_host="\$direct_host"
-	  profile_port="\$public_vless_port"
-	  profile_security=reality
-	  profile_type=tcp
-	  profile_sni=yandex.ru
-	  profile_flow=xtls-rprx-vision
-	  profile_fp=chrome
-	  profile_pbk="\$effective_public_key"
-	  profile_sid=a1b2c3d4e5f6a7b8
-	  profile_path=
-	fi
+	profile_host="\$direct_host"
+	profile_port=443
+	profile_security=tls
+	profile_type=xhttp
+	profile_sni="\$direct_host"
+	profile_flow=
+	profile_fp=chrome
+	profile_pbk=
+	profile_sid=
+	profile_path="\$xhttp_path"
 	
 	cat > "\$server_dir/.env.subscription" <<ENV
 LOG_LEVEL=INFO
@@ -248,6 +244,7 @@ VLESS_FP=\$profile_fp
 VLESS_PBK=\$profile_pbk
 VLESS_SID=\$profile_sid
 VLESS_PATH=\$profile_path
+VLESS_XHTTP_MODE=\$xhttp_mode
 VLESS_HEADER_TYPE=
 VLESS_REMARK_PREFIX=kVPN
 VLESS_FALLBACK_PUBLIC_HOST=\$direct_host
@@ -260,6 +257,7 @@ VLESS_FALLBACK_FP=chrome
 VLESS_FALLBACK_PBK=\$effective_public_key
 VLESS_FALLBACK_SID=a1b2c3d4e5f6a7b8
 VLESS_FALLBACK_PATH=
+VLESS_FALLBACK_XHTTP_MODE=packet-up
 SUPPORT_URL=https://t.me/kvpn_public
 WHITELIST_PROFILE_URL=https://vpn.nnqnn.tech/
 WHITELIST_SOURCE_URL=https://raw.githubusercontent.com/zieng2/wl/main/vless_universal.txt
@@ -309,8 +307,61 @@ else
   echo "xray config unchanged; checking without restart"
 fi
 	systemctl is-active --quiet xray
+	python3 - <<'PY'
+from pathlib import Path
+import json
+import subprocess
+import tempfile
+
+snapshot_path = Path("/var/lib/tgvpn/subscription_snapshot.json")
+if not snapshot_path.exists():
+    raise SystemExit(0)
+snapshot = json.loads(snapshot_path.read_text(encoding="utf-8"))
+users = snapshot.get("users", {})
+if not isinstance(users, dict):
+    raise SystemExit(0)
+
+expected = {}
+managed = []
+for user in users.values():
+    if not isinstance(user, dict):
+        continue
+    telegram_id = user.get("telegram_id")
+    uuid = user.get("uuid")
+    if not telegram_id or not uuid:
+        continue
+    email = f"user-{telegram_id}@vpn.local"
+    managed.append(email)
+    if user.get("main_vpn_active"):
+        expected[email] = str(uuid)
+
+payload = {
+    "xray_bin_path": "xray",
+    "xray_api_server": "127.0.0.1:10085",
+    "xray_api_timeout_seconds": 5,
+    "command_timeout_seconds": 120,
+    "xray_config_path": "/usr/local/etc/xray/config.json",
+    "xray_inbound_tag": "upstream-in",
+    "xray_extra_inbound_tags": ["cdn-ws-in", "xhttp-in"],
+    "persist_users_in_config": False,
+    "vless_flow": "xtls-rprx-vision",
+    "expected": expected,
+    "managed_emails": managed,
+}
+with tempfile.NamedTemporaryFile("w", delete=False, encoding="utf-8", suffix=".json") as f:
+    json.dump(payload, f, ensure_ascii=False)
+    payload_path = f.name
+try:
+    subprocess.run(
+        ["python3", "/home/tgvpn/scripts/reconcile_server2_xray_users.py", "--payload", payload_path],
+        check=True,
+    )
+finally:
+    Path(payload_path).unlink(missing_ok=True)
+PY
 	xray api inboundusercount --server=127.0.0.1:10085 --timeout=5 -tag=upstream-in --json >/dev/null
 	xray api inboundusercount --server=127.0.0.1:10085 --timeout=5 -tag=cdn-ws-in --json >/dev/null
+	xray api inboundusercount --server=127.0.0.1:10085 --timeout=5 -tag=xhttp-in --json >/dev/null
 	if ! command -v cloudflared >/dev/null 2>&1; then
 	  curl -fsSL -o /tmp/cloudflared-linux-amd64.deb \
 	    https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb
@@ -334,7 +385,7 @@ fi
 	fi
 	for _ in \$(seq 1 20); do
 	  if systemctl is-active --quiet tgvpn-subscription.service \
-	    && grep -q '^VLESS_TYPE=ws$' "\$server_dir/.env.subscription"; then
+	    && grep -q '^VLESS_TYPE=xhttp$' "\$server_dir/.env.subscription"; then
 	    break
 	  fi
 	  sleep 1
@@ -361,6 +412,8 @@ set -Eeuo pipefail
 server_dir="$SERVER2_DIR"
 direct_host="$DIRECT_HOST"
 direct_port="$DIRECT_PORT"
+xhttp_port="$XHTTP_PORT"
+xhttp_path="$XHTTP_PATH"
 public_vless_port="$PUBLIC_VLESS_PORT"
 nginx_https_backend_port="$NGINX_HTTPS_BACKEND_PORT"
 subscription_port="$SUBSCRIPTION_PORT"
@@ -408,7 +461,8 @@ fi
 certbot "\${certbot_args[@]}"
 
 cp "\$server_dir/deploy/nginx/s2.nnqnn.tech.conf" /etc/nginx/sites-available/tgvpn-subscription.conf
-sed -i "s/s2\\.nnqnn\\.tech/\$direct_host/g; s/127\\.0\\.0\\.1:8088/127.0.0.1:\$subscription_port/g; s/127\\.0\\.0\\.1:8443/127.0.0.1:\$nginx_https_backend_port/g" /etc/nginx/sites-available/tgvpn-subscription.conf
+escaped_xhttp_path="\$(printf '%s' "\$xhttp_path" | sed 's/[\/&]/\\\\&/g')"
+sed -i "s/s2\\.nnqnn\\.tech/\$direct_host/g; s/127\\.0\\.0\\.1:8088/127.0.0.1:\$subscription_port/g; s/127\\.0\\.0\\.1:8443/127.0.0.1:\$nginx_https_backend_port/g; s/127\\.0\\.0\\.1:10087/127.0.0.1:\$xhttp_port/g; s/\\/kvpn-xhttp/\$escaped_xhttp_path/g" /etc/nginx/sites-available/tgvpn-subscription.conf
 ln -sf /etc/nginx/sites-available/tgvpn-subscription.conf /etc/nginx/sites-enabled/tgvpn-subscription.conf
 rm -f /etc/nginx/sites-enabled/tgvpn-subscription-bootstrap.conf
 if [[ "\$public_vless_port" == "443" ]]; then

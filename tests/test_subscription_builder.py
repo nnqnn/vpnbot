@@ -55,6 +55,7 @@ def _profile() -> SubscriptionProfile:
         vless_pbk="PUBLIC_KEY",
         vless_sid="a1b2c3d4e5f6a7b8",
         vless_path="",
+        vless_xhttp_mode="packet-up",
         vless_header_type="",
         vless_remark_prefix="kVPN",
         whitelist_max_nodes=2,
@@ -372,6 +373,64 @@ def test_xray_json_main_profile_can_include_direct_reality_fallback() -> None:
     assert config["observatory"]["subjectSelector"] == ["proxy-cdn", "proxy-direct"]
 
 
+def test_xray_json_main_profile_can_use_xhttp_tls_as_primary() -> None:
+    snapshot = {
+        "users": {
+            "tok": {
+                "telegram_id": 123,
+                "uuid": "00000000-0000-0000-0000-000000000001",
+                "main_vpn_active": True,
+                "whitelist_enabled": False,
+                "expire": 1781259930,
+            }
+        }
+    }
+    profile = replace(
+        _profile(),
+        vless_public_host="s2.nnqnn.tech",
+        vless_public_port=443,
+        vless_security="tls",
+        vless_type="xhttp",
+        vless_sni="s2.nnqnn.tech",
+        vless_flow="",
+        vless_pbk="",
+        vless_sid="",
+        vless_path="/kvpn-xhttp",
+        vless_xhttp_mode="packet-up",
+        fallback_vless_public_host="s2.nnqnn.tech",
+        fallback_vless_public_port=443,
+        fallback_vless_security="reality",
+        fallback_vless_type="tcp",
+        fallback_vless_sni="yandex.ru",
+        fallback_vless_flow="xtls-rprx-vision",
+        fallback_vless_pbk="PUBLIC_KEY",
+        fallback_vless_sid="a1b2c3d4e5f6a7b8",
+    )
+
+    response = build_xray_json_subscription_response(
+        snapshot=snapshot,
+        product="kVPN",
+        token="tok",
+        profile=profile,
+        whitelist_profile=None,
+    )
+
+    assert response is not None
+    config = json.loads(response.body)[0]
+    primary = config["outbounds"][0]
+    assert primary["tag"] == "proxy-cdn"
+    assert primary["settings"]["vnext"][0]["address"] == "s2.nnqnn.tech"
+    assert primary["settings"]["vnext"][0]["port"] == 443
+    assert primary["streamSettings"]["network"] == "xhttp"
+    assert primary["streamSettings"]["security"] == "tls"
+    assert primary["streamSettings"]["xhttpSettings"] == {
+        "path": "/kvpn-xhttp",
+        "host": "s2.nnqnn.tech",
+        "mode": "packet-up",
+    }
+    assert primary["streamSettings"]["tlsSettings"]["serverName"] == "s2.nnqnn.tech"
+
+
 def test_xray_json_response_returns_empty_profile_list_without_entitlements() -> None:
     snapshot = {
         "users": {
@@ -576,6 +635,12 @@ def test_server2_xray_api_config_preserves_old_chain_client() -> None:
     assert cdn_ws["streamSettings"]["network"] == "ws"
     assert cdn_ws["streamSettings"]["wsSettings"]["path"] == "/kvpn-ws"
     assert "flow" not in cdn_ws["settings"]["clients"][0]
+    xhttp = next(inbound for inbound in config["inbounds"] if inbound["tag"] == "xhttp-in")
+    assert xhttp["listen"] == "127.0.0.1"
+    assert xhttp["port"] == 10087
+    assert xhttp["streamSettings"]["network"] == "xhttp"
+    assert xhttp["streamSettings"]["xhttpSettings"] == {"path": "/kvpn-xhttp", "mode": "packet-up"}
+    assert "flow" not in xhttp["settings"]["clients"][0]
     assert any(inbound["tag"] == "api" for inbound in config["inbounds"])
     assert config["routing"]["rules"][0] == {"type": "field", "inboundTag": ["api"], "outboundTag": "api"}
 

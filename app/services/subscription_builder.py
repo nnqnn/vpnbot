@@ -28,6 +28,7 @@ class SubscriptionProfile:
     vless_pbk: str
     vless_sid: str
     vless_path: str
+    vless_xhttp_mode: str
     vless_header_type: str
     vless_remark_prefix: str
     whitelist_max_nodes: int
@@ -41,6 +42,7 @@ class SubscriptionProfile:
     fallback_vless_pbk: str = ""
     fallback_vless_sid: str = "a1b2c3d4e5f6a7b8"
     fallback_vless_path: str = ""
+    fallback_vless_xhttp_mode: str = "packet-up"
 
 
 @dataclass(frozen=True, slots=True)
@@ -201,6 +203,9 @@ def build_main_vless_node(user: SnapshotUser, profile: SubscriptionProfile) -> s
         "path": profile.vless_path,
         "headerType": profile.vless_header_type,
     }
+    if profile.vless_type == "xhttp":
+        optional["host"] = profile.vless_sni or profile.vless_public_host
+        optional["mode"] = profile.vless_xhttp_mode or "packet-up"
     for key, value in optional.items():
         if value:
             params[key] = value
@@ -224,6 +229,7 @@ def build_main_xray_outbound(user: SnapshotUser, profile: SubscriptionProfile, *
         pbk=profile.vless_pbk,
         sid=profile.vless_sid,
         path=profile.vless_path,
+        xhttp_mode=profile.vless_xhttp_mode,
     )
 
 
@@ -250,6 +256,7 @@ def build_fallback_xray_outbound(
         pbk=profile.fallback_vless_pbk,
         sid=profile.fallback_vless_sid,
         path=profile.fallback_vless_path,
+        xhttp_mode=profile.fallback_vless_xhttp_mode,
     )
 
 
@@ -267,6 +274,7 @@ def _build_vless_xray_outbound(
     pbk: str,
     sid: str,
     path: str,
+    xhttp_mode: str,
 ) -> dict[str, Any]:
     client: dict[str, Any] = {
         "id": user.uuid,
@@ -287,7 +295,7 @@ def _build_vless_xray_outbound(
         stream_settings["xhttpSettings"] = {
             "path": path or "/",
             "host": sni or host,
-            "mode": "auto",
+            "mode": xhttp_mode or "packet-up",
         }
     elif transport == "ws":
         stream_settings["wsSettings"] = {

@@ -130,6 +130,66 @@ log() {
 
 cd "$server_dir"
 
+upsert_env_value() {
+  local key="$1"
+  local value="$2"
+  local env_file=".env"
+  if [[ ! -f "$env_file" ]]; then
+    echo "$env_file not found on server." >&2
+    exit 1
+  fi
+  if grep -qE "^[[:space:]]*${key}=" "$env_file"; then
+    python3 - "$env_file" "$key" "$value" <<'PY'
+from pathlib import Path
+import sys
+
+path = Path(sys.argv[1])
+key = sys.argv[2]
+value = sys.argv[3]
+lines = path.read_text(encoding="utf-8").splitlines()
+out = []
+changed = False
+for line in lines:
+    if line.lstrip().startswith(f"{key}="):
+        out.append(f"{key}={value}")
+        changed = True
+    else:
+        out.append(line)
+if not changed:
+    out.append(f"{key}={value}")
+path.write_text("\n".join(out) + "\n", encoding="utf-8")
+PY
+  else
+    printf '\n%s=%s\n' "$key" "$value" >> "$env_file"
+  fi
+}
+
+ensure_csv_env_contains() {
+  local key="$1"
+  shift
+  local raw current next tag
+  raw="$(grep -E "^[[:space:]]*${key}=" .env | tail -n 1 || true)"
+  current="${raw#*=}"
+  current="${current%$'\r'}"
+  current="${current// /}"
+  next="$current"
+  for tag in "$@"; do
+    if [[ ",$next," != *",$tag,"* ]]; then
+      if [[ -z "$next" ]]; then
+        next="$tag"
+      else
+        next="$next,$tag"
+      fi
+    fi
+  done
+  if [[ "$next" != "$current" ]]; then
+    log "Updating ${key} in .env: ${next}"
+    upsert_env_value "$key" "$next"
+  fi
+}
+
+ensure_csv_env_contains XRAY_EXTRA_INBOUND_TAGS cdn-ws-in xhttp-in
+
 if ! systemctl is-active --quiet xray; then
   echo "xray.service is not active. Refusing to deploy bot changes." >&2
   systemctl status xray --no-pager || true
@@ -241,6 +301,12 @@ fi
 log "Syncing subscription snapshot to server2"
 if ! ".venv/bin/python" scripts/sync_subscription_snapshot.py; then
   rollback "Failed to sync subscription snapshot after deploy."
+  exit 1
+fi
+
+log "Syncing Xray runtime users to server2"
+if ! ".venv/bin/python" scripts/resync_xray_runtime.py; then
+  rollback "Failed to sync Xray runtime after deploy."
   exit 1
 fi
 

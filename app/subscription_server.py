@@ -61,6 +61,7 @@ class RuntimeConfig:
             vless_pbk=_env("VLESS_PBK", ""),
             vless_sid=_env("VLESS_SID", "a1b2c3d4e5f6a7b8"),
             vless_path=_env("VLESS_PATH", ""),
+            vless_xhttp_mode=_env("VLESS_XHTTP_MODE", "packet-up"),
             vless_header_type=_env("VLESS_HEADER_TYPE", ""),
             vless_remark_prefix=_env("VLESS_REMARK_PREFIX", "kVPN"),
             whitelist_max_nodes=int(_env("WHITELIST_MAX_NODES", "300")),
@@ -74,6 +75,7 @@ class RuntimeConfig:
             fallback_vless_pbk=_env("VLESS_FALLBACK_PBK", ""),
             fallback_vless_sid=_env("VLESS_FALLBACK_SID", "a1b2c3d4e5f6a7b8"),
             fallback_vless_path=_env("VLESS_FALLBACK_PATH", ""),
+            fallback_vless_xhttp_mode=_env("VLESS_FALLBACK_XHTTP_MODE", "packet-up"),
         )
 
 

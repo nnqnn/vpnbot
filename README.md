@@ -425,7 +425,7 @@ sudo systemctl restart tgvpn-bot
 ```text
 Bot/PostgreSQL на server #1 -> snapshot + Xray API по SSH -> server #2
 Пользователь -> s2.nnqnn.tech HTTPS endpoint -> персональная Happ-подписка
-Основной VPN для РФ -> Cloudflare Quick Tunnel -> Xray cdn-ws-in:10086
+Основной VPN для РФ -> s2.nnqnn.tech:443 -> Nginx HTTPS -> Xray xhttp-in:10087
 Direct fallback -> s2.nnqnn.tech:443 -> nginx stream -> Xray upstream-in:9443
 ```
 
@@ -436,7 +436,7 @@ Server #1 Xray/Apache не нужны для новой подписки и не
 ```bash
 XRAY_CONTROL_MODE=ssh_api
 XRAY_INBOUND_TAG=upstream-in
-XRAY_EXTRA_INBOUND_TAGS=cdn-ws-in
+XRAY_EXTRA_INBOUND_TAGS=cdn-ws-in,xhttp-in
 XRAY_CONFIG_PATH=/usr/local/etc/xray/config.json
 XRAY_API_ENABLED=true
 XRAY_API_SERVER=127.0.0.1:10085
@@ -446,13 +446,14 @@ XRAY_REMOTE_PORT=22
 XRAY_REMOTE_KEY_PATH=
 XRAY_REMOTE_PASSWORD=SERVER2_ROOT_PASSWORD_OR_EMPTY_IF_KEY_AUTH
 
-VLESS_PUBLIC_HOST=CURRENT_TRYCLOUDFLARE_HOST
+VLESS_PUBLIC_HOST=s2.nnqnn.tech
 VLESS_PUBLIC_PORT=443
 VLESS_SECURITY=tls
-VLESS_TYPE=ws
-VLESS_SNI=CURRENT_TRYCLOUDFLARE_HOST
+VLESS_TYPE=xhttp
+VLESS_SNI=s2.nnqnn.tech
 VLESS_FLOW=
-VLESS_PATH=/kvpn-ws
+VLESS_PATH=/kvpn-xhttp
+VLESS_XHTTP_MODE=packet-up
 VLESS_FALLBACK_PUBLIC_HOST=s2.nnqnn.tech
 VLESS_FALLBACK_PUBLIC_PORT=443
 VLESS_FALLBACK_SECURITY=reality
@@ -466,12 +467,15 @@ SUBSCRIPTION_LINKS_ENABLED=true
 SUBSCRIPTION_SNAPSHOT_SYNC_INTERVAL_MINUTES=1
 SUBSCRIPTION_REMOTE_SNAPSHOT_PATH=/var/lib/tgvpn/subscription_snapshot.json
 SUBSCRIPTION_DIRECT_PORT=9443
+SUBSCRIPTION_XHTTP_PORT=10087
+SUBSCRIPTION_XHTTP_PATH=/kvpn-xhttp
+SUBSCRIPTION_XHTTP_MODE=packet-up
 SUBSCRIPTION_PUBLIC_VLESS_PORT=443
 SUBSCRIPTION_NGINX_HTTPS_BACKEND_PORT=8443
 ```
 
 `SUBSCRIPTION_LINKS_ENABLED=true` включает выдачу Happ-ссылок через `s2.nnqnn.tech`.
-Основной Happ-элемент содержит Cloudflare WS/TLS endpoint и direct Reality fallback. Для РФ основным рабочим путем остается Cloudflare WS/TLS; fallback нужен для сетей, где прямой Reality доступен, и не создает второго элемента в списке Happ.
+Основной Happ-элемент содержит XHTTP/TLS endpoint за настоящим Nginx и direct Reality fallback. Для РФ основным рабочим путем является XHTTP/TLS: снаружи это обычный HTTPS на собственный домен, внутри Nginx проксирует `/kvpn-xhttp` в Xray. Reality остается резервом для сетей, где он не режется, и не создает второго элемента в списке Happ.
 
 На server #2:
 
