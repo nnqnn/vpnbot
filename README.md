@@ -446,7 +446,7 @@ XRAY_REMOTE_PORT=22
 XRAY_REMOTE_KEY_PATH=
 XRAY_REMOTE_PASSWORD=SERVER2_ROOT_PASSWORD_OR_EMPTY_IF_KEY_AUTH
 
-VLESS_PUBLIC_HOST=s2.nnqnn.tech
+VLESS_PUBLIC_HOST=89.125.50.96
 VLESS_PUBLIC_PORT=443
 VLESS_SECURITY=tls
 VLESS_TYPE=xhttp
@@ -454,7 +454,7 @@ VLESS_SNI=s2.nnqnn.tech
 VLESS_FLOW=
 VLESS_PATH=/kvpn-xhttp
 VLESS_XHTTP_MODE=packet-up
-VLESS_FALLBACK_PUBLIC_HOST=s2.nnqnn.tech
+VLESS_FALLBACK_PUBLIC_HOST=89.125.50.96
 VLESS_FALLBACK_PUBLIC_PORT=443
 VLESS_FALLBACK_SECURITY=reality
 VLESS_FALLBACK_TYPE=tcp
@@ -472,10 +472,11 @@ SUBSCRIPTION_XHTTP_PATH=/kvpn-xhttp
 SUBSCRIPTION_XHTTP_MODE=packet-up
 SUBSCRIPTION_PUBLIC_VLESS_PORT=443
 SUBSCRIPTION_NGINX_HTTPS_BACKEND_PORT=8443
+SUBSCRIPTION_ENABLE_CLOUDFLARED=false
 ```
 
 `SUBSCRIPTION_LINKS_ENABLED=true` включает выдачу Happ-ссылок через `s2.nnqnn.tech`.
-Основной Happ-элемент содержит XHTTP/TLS endpoint за настоящим Nginx и direct Reality fallback. Для РФ основным рабочим путем является XHTTP/TLS: снаружи это обычный HTTPS на собственный домен, внутри Nginx проксирует `/kvpn-xhttp` в Xray. Reality остается резервом для сетей, где он не режется, и не создает второго элемента в списке Happ.
+Основной Happ-элемент содержит XHTTP/TLS endpoint за настоящим Nginx и direct Reality fallback. Для РФ основным рабочим путем является XHTTP/TLS: клиент подключается к IP сервера #2, но отправляет SNI/Host `s2.nnqnn.tech`; внутри Nginx проксирует `/kvpn-xhttp` в Xray. Reality остается резервом для сетей, где он не режется, и не создает второго элемента в списке Happ.
 
 На server #2:
 
@@ -487,7 +488,7 @@ scripts/deploy_server2_subscription.sh
 
 Для HTTPS origin используйте `deploy/nginx/s2.nnqnn.tech.conf`. DNS `s2.nnqnn.tech` должен быть DNS-only A record на `89.125.50.96`. Deploy настраивает nginx stream: SNI `s2.nnqnn.tech` уходит в локальный HTTPS backend, остальной TLS-трафик на `443` уходит в Xray `9443`.
 
-Cloudflare Quick Tunnel поднимается systemd unit `tgvpn-cloudflared.service`. Он записывает текущий `trycloudflare.com` host в `/var/lib/tgvpn/cloudflared_quick_url` и обновляет `/home/tgvpn/.env.subscription`; подписка начинает выдавать основной профиль `VLESS + WebSocket + TLS` через Cloudflare.
+Cloudflare Quick Tunnel оставлен только как ручной аварийный режим: по умолчанию `SUBSCRIPTION_ENABLE_CLOUDFLARED=false`, deploy останавливает `tgvpn-cloudflared.service` и не дает ему перезаписывать `/home/tgvpn/.env.subscription` на `trycloudflare.com`.
 
 Worker для `vpn.nnqnn.tech` лежит в `deploy/cloudflare/vpn-nnqnn-worker.js`. Secret `ORIGIN_SECRET` в Worker должен совпадать с `SUBSCRIPTION_ORIGIN_SECRET` на server #2. Worker обслуживает:
 - `/sub/kVPN/<token>`: прокси к server #2 origin;

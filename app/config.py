@@ -39,6 +39,7 @@ class Settings(BaseSettings):
     vless_pbk: str = Field(default="", alias="VLESS_PBK")
     vless_sid: str = Field(default="", alias="VLESS_SID")
     vless_path: str = Field(default="", alias="VLESS_PATH")
+    vless_xhttp_mode: str = Field(default="packet-up", alias="VLESS_XHTTP_MODE")
     vless_header_type: str = Field(default="", alias="VLESS_HEADER_TYPE")
     vless_remark_prefix: str = Field(default="VPN", alias="VLESS_REMARK_PREFIX")
 

@@ -66,7 +66,7 @@ class RuntimeConfig:
             vless_header_type=_env("VLESS_HEADER_TYPE", ""),
             vless_remark_prefix=_env("VLESS_REMARK_PREFIX", "kVPN"),
             whitelist_max_nodes=int(_env("WHITELIST_MAX_NODES", "300")),
-            main_bridge_enabled=_env_bool("MAIN_VPN_BRIDGE_ENABLED", True),
+            main_bridge_enabled=_env_bool("MAIN_VPN_BRIDGE_ENABLED", False),
             main_bridge_max_nodes=int(_env("MAIN_VPN_BRIDGE_MAX_NODES", "8")),
             fallback_vless_public_host=_env("VLESS_FALLBACK_PUBLIC_HOST", ""),
             fallback_vless_public_port=int(_env("VLESS_FALLBACK_PUBLIC_PORT", "443")),

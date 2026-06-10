@@ -3,6 +3,7 @@ from aiogram.fsm.state import State, StatesGroup
 
 class AdminStates(StatesGroup):
     wait_balance_user = State()
+    wait_add_balance = State()
     wait_add_days = State()
     wait_add_days_all = State()
     wait_remove_days = State()

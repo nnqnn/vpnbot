@@ -97,7 +97,7 @@ def test_subscription_response_includes_main_node_for_active_user() -> None:
     assert response.headers["cache-control"] == "no-store"
     assert response.headers["support-url"] == "https://t.me/support"
     assert response.headers["subscription-userinfo"].endswith("expire=1781259930")
-    assert json.loads(base64.b64decode(response.headers["routing"]).decode("utf-8"))["domainStrategy"] == "IPIfNonMatch"
+    assert json.loads(base64.b64decode(response.headers["routing"]).decode("utf-8"))["domainStrategy"] == "AsIs"
 
 
 def test_subscription_response_includes_whitelist_nodes_only_for_buyer_with_expired_vpn() -> None:
@@ -264,6 +264,8 @@ def test_xray_json_response_builds_main_only_profile_without_whitelist_fetch() -
     assert len(configs) == 1
     config = configs[0]
     assert [outbound["tag"] for outbound in config["outbounds"]] == ["proxy", "direct", "block"]
+    assert config["dns"] == {"servers": ["localhost"], "queryStrategy": "UseIPv4"}
+    assert config["routing"]["domainStrategy"] == "AsIs"
     assert config["routing"]["rules"][-1] == {"network": "tcp,udp", "outboundTag": "proxy"}
 
 
@@ -388,7 +390,7 @@ def test_xray_json_main_profile_can_use_xhttp_tls_as_primary() -> None:
     }
     profile = replace(
         _profile(),
-        vless_public_host="s2.nnqnn.tech",
+        vless_public_host="89.125.50.96",
         vless_public_port=443,
         vless_security="tls",
         vless_type="xhttp",
@@ -420,7 +422,7 @@ def test_xray_json_main_profile_can_use_xhttp_tls_as_primary() -> None:
     config = json.loads(response.body)[0]
     primary = config["outbounds"][0]
     assert primary["tag"] == "proxy-cdn"
-    assert primary["settings"]["vnext"][0]["address"] == "s2.nnqnn.tech"
+    assert primary["settings"]["vnext"][0]["address"] == "89.125.50.96"
     assert primary["settings"]["vnext"][0]["port"] == 443
     assert primary["streamSettings"]["network"] == "xhttp"
     assert primary["streamSettings"]["security"] == "tls"

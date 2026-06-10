@@ -108,6 +108,20 @@ def _format_money(value: Decimal) -> str:
     return f"{value.quantize(Decimal('0.01'))} ₽"
 
 
+def _parse_balance_credit_payload(text: str | None) -> tuple[int, Decimal]:
+    payload = (text or "").strip().replace(",", ".").split()
+    if len(payload) != 2:
+        raise ValueError("Формат: telegram_id amount_rub")
+    try:
+        telegram_id = int(payload[0])
+        amount = Decimal(payload[1]).quantize(Decimal("0.01"))
+    except (ValueError, InvalidOperation) as exc:
+        raise ValueError("Неверный формат значений.") from exc
+    if amount <= 0:
+        raise ValueError("Сумма должна быть больше 0.")
+    return telegram_id, amount
+
+
 def _users_export_filename(now: datetime) -> str:
     return f"users_export_{now:%Y%m%d_%H%M%S}.txt"
 
@@ -341,6 +355,19 @@ async def admin_get_balance(callback: CallbackQuery, state: FSMContext, settings
     await callback.answer()
 
 
+@admin_router.callback_query(F.data == "admin:add_balance")
+async def admin_add_balance(callback: CallbackQuery, state: FSMContext, settings: Settings) -> None:
+    if not await _is_admin(callback.from_user.id, settings):
+        await _deny_callback(callback)
+        return
+    await state.set_state(AdminStates.wait_add_balance)
+    await callback.message.edit_text(
+        "Формат: telegram_id amount_rub\nПример: 123456789 150",
+        reply_markup=admin_menu(),
+    )
+    await callback.answer()
+
+
 @admin_router.callback_query(F.data == "admin:add_days")
 async def admin_add_days(callback: CallbackQuery, state: FSMContext, settings: Settings) -> None:
     if not await _is_admin(callback.from_user.id, settings):
@@ -496,6 +523,52 @@ async def process_balance_lookup(message: Message, state: FSMContext, session: A
                 f"Статус: {_status_short(user)}"
             )
         )
+    await state.clear()
+
+
+@admin_router.message(AdminStates.wait_add_balance)
+async def process_add_balance(
+    message: Message,
+    state: FSMContext,
+    session: AsyncSession,
+    settings: Settings,
+    admin_service: AdminService,
+) -> None:
+    if not await _is_admin(message.from_user.id, settings):
+        await _deny_message(message)
+        return
+    try:
+        telegram_id, amount = _parse_balance_credit_payload(message.text)
+    except ValueError as exc:
+        await message.answer(str(exc))
+        return
+
+    user = await UserRepository(session).get_by_telegram_id(telegram_id)
+    if not user:
+        await message.answer("Пользователь не найден")
+        await state.clear()
+        return
+
+    old_balance = user.balance or Decimal("0.00")
+    new_balance = await admin_service.add_balance(user, amount)
+    await message.answer(
+        (
+            "Баланс начислен.\n"
+            f"Пользователь: {telegram_id}\n"
+            f"Было: {_format_money(old_balance)}\n"
+            f"Начислено: {_format_money(amount)}\n"
+            f"Стало: {_format_money(new_balance)}"
+        ),
+        reply_markup=admin_menu(),
+    )
+    await _notify_user(
+        message.bot,
+        telegram_id,
+        (
+            f"💰 Администратор пополнил ваш баланс на {_format_money(amount)}.\n"
+            f"Текущий баланс: {_format_money(new_balance)}."
+        ),
+    )
     await state.clear()
 
 

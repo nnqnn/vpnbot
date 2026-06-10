@@ -20,6 +20,7 @@ LETSENCRYPT_EMAIL="${LETSENCRYPT_EMAIL:-}"
 ORIGIN_SECRET="${SUBSCRIPTION_ORIGIN_SECRET:-}"
 REQUIRE_ORIGIN_SECRET="${SUBSCRIPTION_REQUIRE_ORIGIN_SECRET:-false}"
 RESTART_XRAY="${SUBSCRIPTION_RESTART_XRAY:-false}"
+ENABLE_CLOUDFLARED="${SUBSCRIPTION_ENABLE_CLOUDFLARED:-false}"
 PUBLIC_KEY="${SUBSCRIPTION_SERVER2_VLESS_PBK:-}"
 REALITY_PRIVATE_KEY="${SUBSCRIPTION_SERVER2_REALITY_PRIVATE_KEY:-}"
 ARCHIVE="/tmp/tgvpn-server2-subscription.tar.gz"
@@ -71,6 +72,7 @@ load_optional_env TGVPN_SERVER2_PASSWORD
 load_optional_env SUBSCRIPTION_ORIGIN_SECRET
 load_optional_env SUBSCRIPTION_REQUIRE_ORIGIN_SECRET
 load_optional_env SUBSCRIPTION_RESTART_XRAY
+load_optional_env SUBSCRIPTION_ENABLE_CLOUDFLARED
 load_optional_env SUBSCRIPTION_SERVER2_VLESS_PBK
 load_optional_env SUBSCRIPTION_SERVER2_REALITY_PRIVATE_KEY
 load_optional_env SUBSCRIPTION_SERVER2_HOST
@@ -99,6 +101,7 @@ LETSENCRYPT_EMAIL="${LETSENCRYPT_EMAIL:-$LETSENCRYPT_EMAIL}"
 ORIGIN_SECRET="${SUBSCRIPTION_ORIGIN_SECRET:-$ORIGIN_SECRET}"
 REQUIRE_ORIGIN_SECRET="${SUBSCRIPTION_REQUIRE_ORIGIN_SECRET:-$REQUIRE_ORIGIN_SECRET}"
 RESTART_XRAY="${SUBSCRIPTION_RESTART_XRAY:-$RESTART_XRAY}"
+ENABLE_CLOUDFLARED="${SUBSCRIPTION_ENABLE_CLOUDFLARED:-$ENABLE_CLOUDFLARED}"
 PUBLIC_KEY="${SUBSCRIPTION_SERVER2_VLESS_PBK:-$PUBLIC_KEY}"
 REALITY_PRIVATE_KEY="${SUBSCRIPTION_SERVER2_REALITY_PRIVATE_KEY:-$REALITY_PRIVATE_KEY}"
 
@@ -141,6 +144,7 @@ log "Installing and starting services on server2"
 set -Eeuo pipefail
 
 server_dir="$SERVER2_DIR"
+server2_host="$SERVER2_HOST"
 direct_host="$DIRECT_HOST"
 direct_port="$DIRECT_PORT"
 xhttp_port="$XHTTP_PORT"
@@ -152,6 +156,7 @@ origin_secret="$ORIGIN_SECRET"
 public_key="$PUBLIC_KEY"
 reality_private_key="$REALITY_PRIVATE_KEY"
 restart_xray="$RESTART_XRAY"
+enable_cloudflared="$ENABLE_CLOUDFLARED"
 xray_config=/usr/local/etc/xray/config.json
 
 cd "\$server_dir"
@@ -209,7 +214,7 @@ if [[ -n "\$public_key" && "\$public_key" != "\$effective_public_key" ]]; then
   echo "WARNING: provided SUBSCRIPTION_SERVER2_VLESS_PBK does not match server2 REALITY private key; using derived public key." >&2
 fi
 
-	profile_host="\$direct_host"
+	profile_host="\$server2_host"
 	profile_port=443
 	profile_security=tls
 	profile_type=xhttp
@@ -248,7 +253,7 @@ VLESS_PATH=\$profile_path
 VLESS_XHTTP_MODE=\$xhttp_mode
 VLESS_HEADER_TYPE=
 VLESS_REMARK_PREFIX=kVPN
-VLESS_FALLBACK_PUBLIC_HOST=\$direct_host
+VLESS_FALLBACK_PUBLIC_HOST=\$server2_host
 VLESS_FALLBACK_PUBLIC_PORT=\$public_vless_port
 VLESS_FALLBACK_SECURITY=reality
 VLESS_FALLBACK_TYPE=tcp
@@ -276,6 +281,7 @@ WHITELIST_SOURCE_URL=https://raw.githubusercontent.com/zieng2/wl/main/vless_univ
 WHITELIST_MAX_NODES=300
 MAIN_VPN_BRIDGE_ENABLED=false
 MAIN_VPN_BRIDGE_MAX_NODES=8
+SUBSCRIPTION_ENABLE_CLOUDFLARED=\$enable_cloudflared
 WHITELIST_CACHE_SECONDS=300
 WHITELIST_FETCH_TIMEOUT_SECONDS=4
 WHITELIST_PROFILE_CACHE_PATH=/var/lib/tgvpn/whitelist_profile_cache.json
@@ -376,30 +382,22 @@ PY
 	xray api inboundusercount --server=127.0.0.1:10085 --timeout=5 -tag=upstream-in --json >/dev/null
 	xray api inboundusercount --server=127.0.0.1:10085 --timeout=5 -tag=cdn-ws-in --json >/dev/null
 	xray api inboundusercount --server=127.0.0.1:10085 --timeout=5 -tag=xhttp-in --json >/dev/null
-	if ! command -v cloudflared >/dev/null 2>&1; then
-	  curl -fsSL -o /tmp/cloudflared-linux-amd64.deb \
-	    https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb
-	  DEBIAN_FRONTEND=noninteractive apt-get install -y /tmp/cloudflared-linux-amd64.deb >/dev/null
-	fi
-	systemctl enable tgvpn-cloudflared.service
-	if systemctl is-active --quiet tgvpn-cloudflared.service && [[ -s /var/lib/tgvpn/cloudflared_quick_url ]]; then
-	  echo "cloudflared quick tunnel is already active; keeping current hostname"
-	else
-	  systemctl restart tgvpn-cloudflared.service
-	fi
-	for _ in \$(seq 1 60); do
-	  if [[ -s /var/lib/tgvpn/cloudflared_quick_url ]]; then
-	    break
+	if [[ "\$enable_cloudflared" == "true" ]]; then
+	  if ! command -v cloudflared >/dev/null 2>&1; then
+	    curl -fsSL -o /tmp/cloudflared-linux-amd64.deb \
+	      https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb
+	    DEBIAN_FRONTEND=noninteractive apt-get install -y /tmp/cloudflared-linux-amd64.deb >/dev/null
 	  fi
-	  sleep 1
-	done
-	if [[ ! -s /var/lib/tgvpn/cloudflared_quick_url ]]; then
-	  journalctl -u tgvpn-cloudflared.service -n 120 --no-pager || true
-	  exit 1
+	  systemctl enable tgvpn-cloudflared.service
+	  systemctl restart tgvpn-cloudflared.service
+	else
+	  systemctl disable --now tgvpn-cloudflared.service >/dev/null 2>&1 || true
+	  rm -f /var/lib/tgvpn/cloudflared_quick_url
 	fi
 	for _ in \$(seq 1 20); do
 	  if systemctl is-active --quiet tgvpn-subscription.service \
-	    && grep -q '^VLESS_TYPE=xhttp$' "\$server_dir/.env.subscription"; then
+	    && grep -q '^VLESS_TYPE=xhttp$' "\$server_dir/.env.subscription" \
+	    && grep -q "^VLESS_PUBLIC_HOST=\${server2_host}\$" "\$server_dir/.env.subscription"; then
 	    break
 	  fi
 	  sleep 1

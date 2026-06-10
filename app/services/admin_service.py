@@ -53,3 +53,7 @@ class AdminService:
             user.balance = (user.balance or Decimal("0.00")) + amount
         if days > 0:
             await self.add_days(user, days)
+
+    async def add_balance(self, user: User, amount: Decimal) -> Decimal:
+        user.balance = (user.balance or Decimal("0.00")) + amount
+        return user.balance

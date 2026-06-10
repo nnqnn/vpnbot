@@ -424,11 +424,8 @@ def _build_base_client_config(profile: SubscriptionProfile) -> dict[str, Any]:
     return {
         "log": {"loglevel": "warning"},
         "dns": {
-            "servers": [
-                "https://dns.google/dns-query",
-                "https://cloudflare-dns.com/dns-query",
-            ],
-            "enableParallelQuery": True,
+            "servers": ["localhost"],
+            "queryStrategy": "UseIPv4",
         },
         "inbounds": [
             {
@@ -522,7 +519,7 @@ def _build_single_main_config(
 
     config["routing"] = {
         "domainMatcher": "hybrid",
-        "domainStrategy": "IPIfNonMatch",
+        "domainStrategy": "AsIs",
         "rules": [
             {"ip": ["geoip:private"], "outboundTag": "direct"},
             {"domain": ["geosite:category-ads-all"], "outboundTag": "block"},
@@ -543,7 +540,7 @@ def _build_blocked_config(profile: SubscriptionProfile) -> dict[str, Any]:
     ]
     config["routing"] = {
         "domainMatcher": "hybrid",
-        "domainStrategy": "IPIfNonMatch",
+        "domainStrategy": "AsIs",
         "rules": [
             {"ip": ["geoip:private"], "outboundTag": "direct"},
             {"network": "tcp,udp", "outboundTag": "block"},
@@ -657,7 +654,7 @@ def filter_whitelist_vless_nodes(source_text: str, *, max_nodes: int) -> list[st
 
 def build_default_routing() -> dict[str, Any]:
     return {
-        "domainStrategy": "IPIfNonMatch",
+        "domainStrategy": "AsIs",
         "rules": [
             {
                 "type": "field",

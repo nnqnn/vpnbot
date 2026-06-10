@@ -4,7 +4,7 @@ import asyncio
 from decimal import Decimal
 from types import SimpleNamespace
 
-from app.bot.handlers.admin import _broadcast_to_users
+from app.bot.handlers.admin import _broadcast_to_users, _parse_balance_credit_payload
 from app.bot.keyboards import admin_menu
 from app.bot.states import AdminStates
 from app.services import billing_service as billing_module
@@ -20,7 +20,23 @@ def test_admin_menu_has_whitelist_broadcast_callback() -> None:
     ]
 
     assert "admin:broadcast_whitelist" in callbacks
+    assert "admin:add_balance" in callbacks
     assert hasattr(AdminStates, "wait_broadcast_whitelist_text")
+    assert hasattr(AdminStates, "wait_add_balance")
+
+
+def test_parse_balance_credit_payload_accepts_decimal_and_comma() -> None:
+    assert _parse_balance_credit_payload("123 150") == (123, Decimal("150.00"))
+    assert _parse_balance_credit_payload("123 150,5") == (123, Decimal("150.50"))
+
+
+def test_parse_balance_credit_payload_rejects_non_positive_amount() -> None:
+    try:
+        _parse_balance_credit_payload("123 0")
+    except ValueError as exc:
+        assert "больше 0" in str(exc)
+    else:
+        raise AssertionError("expected ValueError")
 
 
 def test_broadcast_to_users_counts_sent_and_failed() -> None:

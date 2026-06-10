@@ -37,6 +37,9 @@ class XrayService:
             "path": self.settings.vless_path,
             "headerType": self.settings.vless_header_type,
         }
+        if self.settings.vless_type == "xhttp":
+            optional["host"] = self.settings.vless_sni or self.settings.vless_public_host
+            optional["mode"] = self.settings.vless_xhttp_mode or "packet-up"
         for key, value in optional.items():
             if value:
                 params[key] = value
