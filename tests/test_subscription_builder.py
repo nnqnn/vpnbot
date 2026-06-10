@@ -515,6 +515,45 @@ def test_xray_json_main_profile_can_chain_server2_through_bridge_nodes() -> None
     ]
 
 
+def test_xray_json_main_profile_can_include_legacy_server1_fallback() -> None:
+    snapshot = {
+        "users": {
+            "tok": {
+                "telegram_id": 123,
+                "uuid": "00000000-0000-0000-0000-000000000001",
+                "main_vpn_active": True,
+                "whitelist_enabled": False,
+                "expire": 1781259930,
+            }
+        }
+    }
+    profile = replace(
+        _profile(),
+        fallback_vless_public_host="s2.nnqnn.tech",
+        fallback_vless_pbk="PUBLIC_KEY",
+        legacy_vless_public_host="5.129.213.120",
+        legacy_vless_public_port=8443,
+        legacy_vless_pbk="SERVER1_PUBLIC_KEY",
+        legacy_vless_sid="c0ba09b546ccb4a8",
+    )
+
+    response = build_xray_json_subscription_response(
+        snapshot=snapshot,
+        product="kVPN",
+        token="tok",
+        profile=profile,
+        whitelist_profile=None,
+    )
+
+    assert response is not None
+    config = json.loads(response.body)[0]
+    legacy = next(outbound for outbound in config["outbounds"] if outbound["tag"] == "proxy-legacy")
+    assert legacy["settings"]["vnext"][0]["address"] == "5.129.213.120"
+    assert legacy["settings"]["vnext"][0]["port"] == 8443
+    assert legacy["streamSettings"]["realitySettings"]["serverName"] == "yandex.ru"
+    assert config["routing"]["balancers"][0]["selector"] == ["proxy-cdn", "proxy-direct", "proxy-legacy"]
+
+
 def test_xray_json_response_can_set_profile_web_page_url_to_channel() -> None:
     snapshot = {
         "users": {

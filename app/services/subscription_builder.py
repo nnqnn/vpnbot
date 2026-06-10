@@ -46,6 +46,17 @@ class SubscriptionProfile:
     fallback_vless_sid: str = "a1b2c3d4e5f6a7b8"
     fallback_vless_path: str = ""
     fallback_vless_xhttp_mode: str = "packet-up"
+    legacy_vless_public_host: str = ""
+    legacy_vless_public_port: int = 8443
+    legacy_vless_security: str = "reality"
+    legacy_vless_type: str = "tcp"
+    legacy_vless_sni: str = "yandex.ru"
+    legacy_vless_flow: str = "xtls-rprx-vision"
+    legacy_vless_fp: str = "chrome"
+    legacy_vless_pbk: str = ""
+    legacy_vless_sid: str = ""
+    legacy_vless_path: str = ""
+    legacy_vless_xhttp_mode: str = "packet-up"
 
 
 @dataclass(frozen=True, slots=True)
@@ -265,6 +276,33 @@ def build_fallback_xray_outbound(
     )
 
 
+def build_legacy_xray_outbound(
+    user: SnapshotUser,
+    profile: SubscriptionProfile,
+    *,
+    tag: str = "proxy-legacy",
+) -> dict[str, Any] | None:
+    if not profile.legacy_vless_public_host:
+        return None
+    if profile.legacy_vless_security == "reality" and not profile.legacy_vless_pbk:
+        return None
+    return _build_vless_xray_outbound(
+        user=user,
+        tag=tag,
+        host=profile.legacy_vless_public_host,
+        port=profile.legacy_vless_public_port,
+        security=profile.legacy_vless_security,
+        transport=profile.legacy_vless_type,
+        sni=profile.legacy_vless_sni,
+        flow=profile.legacy_vless_flow,
+        fp=profile.legacy_vless_fp,
+        pbk=profile.legacy_vless_pbk,
+        sid=profile.legacy_vless_sid,
+        path=profile.legacy_vless_path,
+        xhttp_mode=profile.legacy_vless_xhttp_mode,
+    )
+
+
 def _build_chained_main_outbound(
     user: SnapshotUser,
     profile: SubscriptionProfile,
@@ -432,13 +470,14 @@ def _build_single_main_config(
     config["remarks"] = f"{profile.profile_title} - Основной VPN"
     primary_outbound = build_main_xray_outbound(user, profile, tag="proxy")
     fallback_outbound = build_fallback_xray_outbound(user, profile, tag="proxy-direct")
+    legacy_outbound = build_legacy_xray_outbound(user, profile, tag="proxy-legacy")
     bridge_outbounds = _build_bridge_outbounds(bridge_profile, max_nodes=profile.main_bridge_max_nodes) if profile.main_bridge_enabled else []
     chained_outbounds = [
         _build_chained_main_outbound(user, profile, tag=f"proxy-bridge-{index:03d}", bridge_tag=str(bridge["tag"]))
         for index, bridge in enumerate(bridge_outbounds, start=1)
     ]
 
-    if fallback_outbound is None and not chained_outbounds:
+    if fallback_outbound is None and legacy_outbound is None and not chained_outbounds:
         config["outbounds"] = [
             primary_outbound,
             {"tag": "direct", "protocol": "freedom"},
@@ -455,6 +494,9 @@ def _build_single_main_config(
         if fallback_outbound is not None:
             config["outbounds"].append(fallback_outbound)
             proxy_selectors.append("proxy-direct")
+        if legacy_outbound is not None:
+            config["outbounds"].append(legacy_outbound)
+            proxy_selectors.append("proxy-legacy")
         config["outbounds"].extend(chained_outbounds)
         proxy_selectors.extend(str(outbound["tag"]) for outbound in chained_outbounds)
         config["outbounds"].extend(bridge_outbounds)

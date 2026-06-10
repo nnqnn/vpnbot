@@ -79,6 +79,17 @@ class RuntimeConfig:
             fallback_vless_sid=_env("VLESS_FALLBACK_SID", "a1b2c3d4e5f6a7b8"),
             fallback_vless_path=_env("VLESS_FALLBACK_PATH", ""),
             fallback_vless_xhttp_mode=_env("VLESS_FALLBACK_XHTTP_MODE", "packet-up"),
+            legacy_vless_public_host=_env("VLESS_LEGACY_PUBLIC_HOST", ""),
+            legacy_vless_public_port=int(_env("VLESS_LEGACY_PUBLIC_PORT", "8443")),
+            legacy_vless_security=_env("VLESS_LEGACY_SECURITY", "reality"),
+            legacy_vless_type=_env("VLESS_LEGACY_TYPE", "tcp"),
+            legacy_vless_sni=_env("VLESS_LEGACY_SNI", "yandex.ru"),
+            legacy_vless_flow=_env("VLESS_LEGACY_FLOW", "xtls-rprx-vision"),
+            legacy_vless_fp=_env("VLESS_LEGACY_FP", "chrome"),
+            legacy_vless_pbk=_env("VLESS_LEGACY_PBK", ""),
+            legacy_vless_sid=_env("VLESS_LEGACY_SID", ""),
+            legacy_vless_path=_env("VLESS_LEGACY_PATH", ""),
+            legacy_vless_xhttp_mode=_env("VLESS_LEGACY_XHTTP_MODE", "packet-up"),
         )
 
 
