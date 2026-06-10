@@ -423,7 +423,7 @@ sudo systemctl restart tgvpn-bot
 ```text
 Bot/PostgreSQL на server #1 -> snapshot + Xray API по SSH -> server #2
 Пользователь -> vpn.nnqnn.tech Worker -> s2.nnqnn.tech HTTPS endpoint
-Пользовательский VLESS Reality -> s2.nnqnn.tech:9443
+Пользовательский VLESS Reality -> s2.nnqnn.tech:443 -> nginx stream -> Xray:9443
 ```
 
 Server #1 Xray/Apache не нужны для новой подписки и не меняются. Старая цепочка может работать параллельно.
@@ -443,18 +443,21 @@ XRAY_REMOTE_KEY_PATH=
 XRAY_REMOTE_PASSWORD=SERVER2_ROOT_PASSWORD_OR_EMPTY_IF_KEY_AUTH
 
 VLESS_PUBLIC_HOST=s2.nnqnn.tech
-VLESS_PUBLIC_PORT=9443
-VLESS_SNI=www.cloudflare.com
+VLESS_PUBLIC_PORT=443
+VLESS_SNI=yandex.ru
 VLESS_PBK=SERVER2_REALITY_PUBLIC_KEY
 VLESS_SID=a1b2c3d4e5f6a7b8
 
-SUBSCRIPTION_PUBLIC_BASE_URL=https://vpn.nnqnn.tech
-SUBSCRIPTION_LINKS_ENABLED=false
+SUBSCRIPTION_PUBLIC_BASE_URL=https://s2.nnqnn.tech
+SUBSCRIPTION_LINKS_ENABLED=true
 SUBSCRIPTION_SNAPSHOT_SYNC_INTERVAL_MINUTES=1
 SUBSCRIPTION_REMOTE_SNAPSHOT_PATH=/var/lib/tgvpn/subscription_snapshot.json
+SUBSCRIPTION_DIRECT_PORT=9443
+SUBSCRIPTION_PUBLIC_VLESS_PORT=443
+SUBSCRIPTION_NGINX_HTTPS_BACKEND_PORT=8443
 ```
 
-Оставьте `SUBSCRIPTION_LINKS_ENABLED=false`, пока `s2.nnqnn.tech` и Worker не готовы. После проверки публичной подписки переключите на `true`, чтобы бот начал выдавать Happ-ссылки вместо старого raw VLESS-ключа.
+`SUBSCRIPTION_LINKS_ENABLED=true` включает выдачу Happ-ссылок через `s2.nnqnn.tech`.
 
 На server #2:
 
@@ -464,7 +467,7 @@ TGVPN_SERVER2_PASSWORD="SERVER2_ROOT_PASSWORD" \
 scripts/deploy_server2_subscription.sh
 ```
 
-Для HTTPS origin используйте `deploy/nginx/s2.nnqnn.tech.conf`. DNS `s2.nnqnn.tech` должен быть DNS-only A record на `89.125.50.96`.
+Для HTTPS origin используйте `deploy/nginx/s2.nnqnn.tech.conf`. DNS `s2.nnqnn.tech` должен быть DNS-only A record на `89.125.50.96`. Deploy настраивает nginx stream: SNI `s2.nnqnn.tech` уходит в локальный HTTPS backend, остальной TLS-трафик на `443` уходит в Xray `9443`.
 
 Worker для `vpn.nnqnn.tech` лежит в `deploy/cloudflare/vpn-nnqnn-worker.js`. Secret `ORIGIN_SECRET` в Worker должен совпадать с `SUBSCRIPTION_ORIGIN_SECRET` на server #2. Worker обслуживает:
 - `/sub/kVPN/<token>`: прокси к server #2 origin;
