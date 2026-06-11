@@ -188,7 +188,17 @@ ensure_csv_env_contains() {
   fi
 }
 
-ensure_csv_env_contains XRAY_EXTRA_INBOUND_TAGS cdn-ws-in xhttp-in
+upsert_env_value XRAY_INBOUND_TAG direct-reality-8443
+ensure_csv_env_contains XRAY_EXTRA_INBOUND_TAGS upstream-in cdn-ws-in xhttp-in
+upsert_env_value XRAY_FLOW_INBOUND_TAGS direct-reality-8443,upstream-in
+upsert_env_value VLESS_PUBLIC_HOST 89.125.50.96
+upsert_env_value VLESS_PUBLIC_PORT 8443
+upsert_env_value VLESS_SECURITY reality
+upsert_env_value VLESS_TYPE tcp
+upsert_env_value VLESS_SNI yandex.ru
+upsert_env_value VLESS_FLOW xtls-rprx-vision
+upsert_env_value VLESS_PATH ""
+upsert_env_value VLESS_XHTTP_MODE packet-up
 
 if ! systemctl is-active --quiet xray; then
   echo "xray.service is not active. Refusing to deploy bot changes." >&2
@@ -309,6 +319,71 @@ if ! ".venv/bin/python" scripts/resync_xray_runtime.py </dev/null; then
   rollback "Failed to sync Xray runtime after deploy."
   exit 1
 fi
+
+log "Verifying exported subscription uses Reality 8443"
+token="$(
+  ".venv/bin/python" - <<'PY'
+import json
+from pathlib import Path
+
+snapshot = json.loads(Path("logs/subscription_snapshot.json").read_text(encoding="utf-8"))
+for token, user in snapshot.get("users", {}).items():
+    if isinstance(user, dict) and user.get("main_vpn_active"):
+        print(token)
+        break
+PY
+)"
+if [[ -z "$token" ]]; then
+  rollback "No active subscription token found for Reality 8443 verification."
+  exit 1
+fi
+subscription_body="$(mktemp)"
+if ! curl -fsS "https://s2.nnqnn.tech/sub/kVPN/${token}?format=raw" -o "$subscription_body"; then
+  rm -f "$subscription_body"
+  rollback "Failed to fetch raw subscription for verification."
+  exit 1
+fi
+if ! ".venv/bin/python" - "$subscription_body" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+configs = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+if not isinstance(configs, list):
+    raise SystemExit("subscription body is not a profile list")
+main = next((item for item in configs if isinstance(item, dict) and item.get("remarks", "").endswith("Основной VPN")), None)
+if main is None:
+    raise SystemExit("main VPN profile was not found")
+outbounds = main.get("outbounds")
+if not isinstance(outbounds, list) or not outbounds:
+    raise SystemExit("main VPN profile has no outbounds")
+proxy = outbounds[0]
+vnext = proxy.get("settings", {}).get("vnext", [])
+if not vnext:
+    raise SystemExit("main outbound has no vnext")
+server = vnext[0]
+users = server.get("users", [])
+stream = proxy.get("streamSettings", {})
+reality = stream.get("realitySettings", {})
+if server.get("address") != "89.125.50.96":
+    raise SystemExit(f"unexpected address: {server.get('address')}")
+if int(server.get("port") or 0) != 8443:
+    raise SystemExit(f"unexpected port: {server.get('port')}")
+if stream.get("network") != "tcp":
+    raise SystemExit(f"unexpected network: {stream.get('network')}")
+if stream.get("security") != "reality":
+    raise SystemExit(f"unexpected security: {stream.get('security')}")
+if reality.get("serverName") != "yandex.ru":
+    raise SystemExit(f"unexpected serverName: {reality.get('serverName')}")
+if not users or users[0].get("flow") != "xtls-rprx-vision":
+    raise SystemExit("main user flow is not xtls-rprx-vision")
+PY
+then
+  rm -f "$subscription_body"
+  rollback "Raw subscription still does not use Reality 8443."
+  exit 1
+fi
+rm -f "$subscription_body"
 
 log "Deploy completed"
 systemctl --no-pager --full status "$service" | sed -n '1,12p'

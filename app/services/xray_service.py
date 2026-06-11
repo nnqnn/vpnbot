@@ -321,6 +321,7 @@ class XrayService:
             "xray_config_path": str(self.settings.xray_config_path),
             "xray_inbound_tag": self.settings.xray_inbound_tag,
             "xray_extra_inbound_tags": self._extra_inbound_tags(),
+            "xray_flow_inbound_tags": self._flow_inbound_tags(),
             "persist_users_in_config": self._persist_users_in_config(),
             "vless_flow": self.settings.vless_flow,
             "expected": expected_by_email,
@@ -649,6 +650,13 @@ class XrayService:
         raw_value = getattr(self.settings, "xray_extra_inbound_tags", "")
         return [tag.strip() for tag in str(raw_value).split(",") if tag.strip()]
 
+    def _flow_inbound_tags(self) -> list[str]:
+        raw_value = getattr(self.settings, "xray_flow_inbound_tags", "")
+        tags = [tag.strip() for tag in str(raw_value).split(",") if tag.strip()]
+        if tags:
+            return tags
+        return [self.settings.xray_inbound_tag]
+
     def _managed_inbound_tags(self) -> list[str]:
         tags = [self.settings.xray_inbound_tag]
         for tag in self._extra_inbound_tags():
@@ -657,7 +665,7 @@ class XrayService:
         return tags
 
     def _flow_for_inbound_tag(self, inbound_tag: str) -> str:
-        return self.settings.vless_flow if inbound_tag == self.settings.xray_inbound_tag else ""
+        return self.settings.vless_flow if inbound_tag in set(self._flow_inbound_tags()) else ""
 
     @staticmethod
     def _write_temp_json(payload: dict[str, Any]) -> str:

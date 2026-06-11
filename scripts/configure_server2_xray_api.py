@@ -15,6 +15,8 @@ def main() -> None:
     parser.add_argument("--api-port", type=int, default=10085)
     parser.add_argument("--inbound-tag", default="upstream-in")
     parser.add_argument("--direct-port", type=int, default=9443)
+    parser.add_argument("--public-reality-inbound-tag", default="direct-reality-8443")
+    parser.add_argument("--public-reality-port", type=int, default=8443)
     parser.add_argument("--cdn-ws-inbound-tag", default="cdn-ws-in")
     parser.add_argument("--cdn-ws-port", type=int, default=10086)
     parser.add_argument("--cdn-ws-path", default="/kvpn-ws")
@@ -35,6 +37,8 @@ def main() -> None:
         api_port=args.api_port,
         inbound_tag=args.inbound_tag,
         direct_port=args.direct_port,
+        public_reality_inbound_tag=args.public_reality_inbound_tag,
+        public_reality_port=args.public_reality_port,
         cdn_ws_inbound_tag=args.cdn_ws_inbound_tag,
         cdn_ws_port=args.cdn_ws_port,
         cdn_ws_path=args.cdn_ws_path,
@@ -68,6 +72,8 @@ def ensure_xray_api(
     api_port: int,
     inbound_tag: str = "upstream-in",
     direct_port: int = 9443,
+    public_reality_inbound_tag: str = "direct-reality-8443",
+    public_reality_port: int = 8443,
     cdn_ws_inbound_tag: str = "cdn-ws-in",
     cdn_ws_port: int = 10086,
     cdn_ws_path: str = "/kvpn-ws",
@@ -87,6 +93,15 @@ def ensure_xray_api(
         data,
         inbound_tag=inbound_tag,
         direct_port=direct_port,
+        server_names=server_names or ["www.cloudflare.com", "yandex.ru"],
+        short_id=short_id,
+        flow=flow,
+        private_key=private_key,
+    ) or changed
+    changed = ensure_direct_vless_reality_inbound(
+        data,
+        inbound_tag=public_reality_inbound_tag,
+        direct_port=public_reality_port,
         server_names=server_names or ["www.cloudflare.com", "yandex.ru"],
         short_id=short_id,
         flow=flow,
@@ -139,7 +154,7 @@ def ensure_xray_api(
     if not any(rule.get("inboundTag") == ["api"] and rule.get("outboundTag") == "api" for rule in rules):
         rules.insert(0, api_rule)
         changed = True
-    vpn_inbound_tags = sorted({inbound_tag, cdn_ws_inbound_tag, xhttp_inbound_tag})
+    vpn_inbound_tags = sorted({inbound_tag, public_reality_inbound_tag, cdn_ws_inbound_tag, xhttp_inbound_tag})
     vpn_direct_rule = {
         "type": "field",
         "inboundTag": vpn_inbound_tags,
@@ -407,6 +422,7 @@ def ensure_direct_vless_reality_inbound(
     inbounds = data.setdefault("inbounds", [])
     inbound = _find_by_tag(inbounds, inbound_tag)
     if inbound is None:
+        private_key = private_key or _first_reality_private_key(inbounds)
         if not private_key:
             raise ValueError(
                 f"Inbound '{inbound_tag}' does not exist and --private-key was not provided; "
@@ -497,6 +513,22 @@ def _find_by_tag(items: list[dict[str, Any]], tag: str) -> dict[str, Any] | None
         if item.get("tag") == tag:
             return item
     return None
+
+
+def _first_reality_private_key(inbounds: list[dict[str, Any]]) -> str:
+    for inbound in inbounds:
+        if not isinstance(inbound, dict):
+            continue
+        stream = inbound.get("streamSettings")
+        if not isinstance(stream, dict) or stream.get("security") != "reality":
+            continue
+        reality = stream.get("realitySettings")
+        if not isinstance(reality, dict):
+            continue
+        private_key = reality.get("privateKey")
+        if isinstance(private_key, str) and private_key:
+            return private_key
+    return ""
 
 
 def _merge_dict(target: dict[str, Any], expected: dict[str, Any]) -> bool:

@@ -46,8 +46,8 @@ def _profile() -> SubscriptionProfile:
         announce_url="https://t.me/news",
         announce_text="kVPN auto update",
         profile_web_page_url="",
-        vless_public_host="s2.nnqnn.tech",
-        vless_public_port=9443,
+        vless_public_host="89.125.50.96",
+        vless_public_port=8443,
         vless_security="reality",
         vless_type="tcp",
         vless_sni="yandex.ru",
@@ -92,7 +92,7 @@ def test_subscription_response_includes_main_node_for_active_user() -> None:
 
     assert response is not None
     decoded = _decode_body(response.body)
-    assert decoded.startswith("vless://00000000-0000-0000-0000-000000000001@s2.nnqnn.tech:9443")
+    assert decoded.startswith("vless://00000000-0000-0000-0000-000000000001@89.125.50.96:8443")
     assert "pbk=PUBLIC_KEY" in decoded
     assert response.headers["cache-control"] == "no-store"
     assert response.headers["support-url"] == "https://t.me/support"
@@ -130,7 +130,7 @@ def test_subscription_response_includes_whitelist_nodes_only_for_buyer_with_expi
 
     assert response is not None
     decoded = _decode_body(response.body)
-    assert "00000000-0000-0000-0000-000000000001@s2.nnqnn.tech" not in decoded
+    assert "00000000-0000-0000-0000-000000000001@89.125.50.96" not in decoded
     assert decoded.splitlines() == [
         "vless://wl-1@example.com:443?encryption=none#good",
         "vless://wl-2@example.com:443?encryption=none#good2",
@@ -229,7 +229,7 @@ def test_xray_json_response_separates_main_and_whitelist_profiles_for_full_acces
     main_config, whitelist_config = configs
     assert main_config["remarks"] == "kVPN @kkVPNrobot - Основной VPN"
     assert main_config["outbounds"][0]["tag"] == "proxy"
-    assert main_config["outbounds"][0]["settings"]["vnext"][0]["address"] == "s2.nnqnn.tech"
+    assert main_config["outbounds"][0]["settings"]["vnext"][0]["address"] == "89.125.50.96"
     assert main_config["outbounds"][0]["streamSettings"]["realitySettings"]["serverName"] == "yandex.ru"
     assert whitelist_config["remarks"] == "kVPN @kkVPNrobot - Обход белых списков"
     assert whitelist_config["outbounds"][0]["tag"] == "auto-001"
@@ -711,6 +711,28 @@ def test_old_chain_client_is_not_managed_by_bot() -> None:
     assert XrayService._is_managed_email("old-server@chain.local") is False
 
 
+def test_xray_service_uses_flow_only_for_reality_inbound_tags() -> None:
+    service = XrayService(
+        SimpleNamespace(
+            xray_inbound_tag="direct-reality-8443",
+            xray_extra_inbound_tags="upstream-in,cdn-ws-in,xhttp-in",
+            xray_flow_inbound_tags="direct-reality-8443,upstream-in",
+            vless_flow="xtls-rprx-vision",
+        )
+    )
+
+    assert service._managed_inbound_tags() == [
+        "direct-reality-8443",
+        "upstream-in",
+        "cdn-ws-in",
+        "xhttp-in",
+    ]
+    assert service._flow_for_inbound_tag("direct-reality-8443") == "xtls-rprx-vision"
+    assert service._flow_for_inbound_tag("upstream-in") == "xtls-rprx-vision"
+    assert service._flow_for_inbound_tag("cdn-ws-in") == ""
+    assert service._flow_for_inbound_tag("xhttp-in") == ""
+
+
 def test_remote_xray_config_sync_preserves_old_chain_and_removes_stale_users() -> None:
     service = XrayService(SimpleNamespace(xray_inbound_tag="upstream-in", vless_flow="xtls-rprx-vision"))
     config = {
@@ -789,6 +811,13 @@ def test_server2_xray_api_config_preserves_old_chain_client() -> None:
     upstream = next(inbound for inbound in config["inbounds"] if inbound["tag"] == "upstream-in")
     assert upstream["settings"]["clients"][0]["email"] == "old-server@chain.local"
     assert "yandex.ru" in upstream["streamSettings"]["realitySettings"]["serverNames"]
+    direct_reality = next(inbound for inbound in config["inbounds"] if inbound["tag"] == "direct-reality-8443")
+    assert direct_reality["listen"] == "0.0.0.0"
+    assert direct_reality["port"] == 8443
+    assert direct_reality["streamSettings"]["network"] == "tcp"
+    assert direct_reality["streamSettings"]["security"] == "reality"
+    assert direct_reality["streamSettings"]["realitySettings"]["privateKey"] == "PRIVATE_KEY"
+    assert "yandex.ru" in direct_reality["streamSettings"]["realitySettings"]["serverNames"]
     cdn_ws = next(inbound for inbound in config["inbounds"] if inbound["tag"] == "cdn-ws-in")
     assert cdn_ws["listen"] == "127.0.0.1"
     assert cdn_ws["port"] == 10086
@@ -805,7 +834,7 @@ def test_server2_xray_api_config_preserves_old_chain_client() -> None:
     assert config["routing"]["rules"][0] == {"type": "field", "inboundTag": ["api"], "outboundTag": "api"}
     assert {
         "type": "field",
-        "inboundTag": ["cdn-ws-in", "upstream-in", "xhttp-in"],
+        "inboundTag": ["cdn-ws-in", "direct-reality-8443", "upstream-in", "xhttp-in"],
         "network": "tcp,udp",
         "outboundTag": "direct",
     } in config["routing"]["rules"]

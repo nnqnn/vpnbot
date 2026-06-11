@@ -10,11 +10,13 @@ SERVER2_USER="${SUBSCRIPTION_SERVER2_USER:-root}"
 SERVER2_DIR="${SUBSCRIPTION_SERVER2_DIR:-/home/tgvpn}"
 DIRECT_HOST="${SUBSCRIPTION_DIRECT_HOST:-s2.nnqnn.tech}"
 DIRECT_PORT="${SUBSCRIPTION_DIRECT_PORT:-9443}"
+PUBLIC_REALITY_INBOUND_TAG="${SUBSCRIPTION_PUBLIC_REALITY_INBOUND_TAG:-direct-reality-8443}"
+PUBLIC_REALITY_PORT="${SUBSCRIPTION_PUBLIC_REALITY_PORT:-8443}"
 XHTTP_PORT="${SUBSCRIPTION_XHTTP_PORT:-10087}"
 XHTTP_PATH="${SUBSCRIPTION_XHTTP_PATH:-/kvpn-xhttp}"
 XHTTP_MODE="${SUBSCRIPTION_XHTTP_MODE:-packet-up}"
-PUBLIC_VLESS_PORT="${SUBSCRIPTION_PUBLIC_VLESS_PORT:-443}"
-NGINX_HTTPS_BACKEND_PORT="${SUBSCRIPTION_NGINX_HTTPS_BACKEND_PORT:-8443}"
+PUBLIC_VLESS_PORT="${SUBSCRIPTION_PUBLIC_VLESS_PORT:-8443}"
+NGINX_HTTPS_BACKEND_PORT="${SUBSCRIPTION_NGINX_HTTPS_BACKEND_PORT:-18443}"
 SUBSCRIPTION_PORT="${SUBSCRIPTION_LISTEN_PORT:-8088}"
 LETSENCRYPT_EMAIL="${LETSENCRYPT_EMAIL:-}"
 ORIGIN_SECRET="${SUBSCRIPTION_ORIGIN_SECRET:-}"
@@ -80,6 +82,8 @@ load_optional_env SUBSCRIPTION_SERVER2_USER
 load_optional_env SUBSCRIPTION_SERVER2_DIR
 load_optional_env SUBSCRIPTION_DIRECT_HOST
 load_optional_env SUBSCRIPTION_DIRECT_PORT
+load_optional_env SUBSCRIPTION_PUBLIC_REALITY_INBOUND_TAG
+load_optional_env SUBSCRIPTION_PUBLIC_REALITY_PORT
 load_optional_env SUBSCRIPTION_XHTTP_PORT
 load_optional_env SUBSCRIPTION_XHTTP_PATH
 load_optional_env SUBSCRIPTION_XHTTP_MODE
@@ -92,6 +96,8 @@ SERVER2_USER="${SUBSCRIPTION_SERVER2_USER:-$SERVER2_USER}"
 SERVER2_DIR="${SUBSCRIPTION_SERVER2_DIR:-$SERVER2_DIR}"
 DIRECT_HOST="${SUBSCRIPTION_DIRECT_HOST:-$DIRECT_HOST}"
 DIRECT_PORT="${SUBSCRIPTION_DIRECT_PORT:-$DIRECT_PORT}"
+PUBLIC_REALITY_INBOUND_TAG="${SUBSCRIPTION_PUBLIC_REALITY_INBOUND_TAG:-$PUBLIC_REALITY_INBOUND_TAG}"
+PUBLIC_REALITY_PORT="${SUBSCRIPTION_PUBLIC_REALITY_PORT:-$PUBLIC_REALITY_PORT}"
 XHTTP_PORT="${SUBSCRIPTION_XHTTP_PORT:-$XHTTP_PORT}"
 XHTTP_PATH="${SUBSCRIPTION_XHTTP_PATH:-$XHTTP_PATH}"
 XHTTP_MODE="${SUBSCRIPTION_XHTTP_MODE:-$XHTTP_MODE}"
@@ -147,6 +153,8 @@ server_dir="$SERVER2_DIR"
 server2_host="$SERVER2_HOST"
 direct_host="$DIRECT_HOST"
 direct_port="$DIRECT_PORT"
+public_reality_inbound_tag="$PUBLIC_REALITY_INBOUND_TAG"
+public_reality_port="$PUBLIC_REALITY_PORT"
 xhttp_port="$XHTTP_PORT"
 xhttp_path="$XHTTP_PATH"
 xhttp_mode="$XHTTP_MODE"
@@ -175,12 +183,30 @@ SYSCTL
 sysctl --system >/dev/null || true
 python3 -m compileall -q app scripts
 
+if command -v nginx >/dev/null 2>&1; then
+  if [[ -f /etc/nginx/sites-available/tgvpn-subscription.conf ]]; then
+    sed -i \
+      "s/listen 127\\.0\\.0\\.1:8443 ssl http2;/listen 127.0.0.1:\$nginx_https_backend_port ssl http2;/g; s/listen 127\\.0\\.0\\.1:18443 ssl http2;/listen 127.0.0.1:\$nginx_https_backend_port ssl http2;/g" \
+      /etc/nginx/sites-available/tgvpn-subscription.conf
+  fi
+  if [[ -f /etc/nginx/stream-conf.d/tgvpn-sni.conf ]]; then
+    sed -i \
+      "s/127\\.0\\.0\\.1:8443/127.0.0.1:\$nginx_https_backend_port/g; s/127\\.0\\.0\\.1:18443/127.0.0.1:\$nginx_https_backend_port/g" \
+      /etc/nginx/stream-conf.d/tgvpn-sni.conf
+  fi
+  if nginx -t >/dev/null 2>&1; then
+    systemctl reload nginx || true
+  fi
+fi
+
 before_hash="\$(sha256sum "\$xray_config" | awk '{print \$1}')"
 python3 "\$server_dir/scripts/configure_server2_xray_api.py" \
   --config "\$xray_config" \
 	  --api-port 10085 \
 	  --inbound-tag upstream-in \
 	  --direct-port "\$direct_port" \
+	  --public-reality-inbound-tag "\$public_reality_inbound_tag" \
+	  --public-reality-port "\$public_reality_port" \
 	  --cdn-ws-inbound-tag cdn-ws-in \
 	  --cdn-ws-port 10086 \
 	  --cdn-ws-path /kvpn-ws \
@@ -224,15 +250,15 @@ if [[ -n "\$public_key" && "\$public_key" != "\$effective_public_key" ]]; then
 fi
 
 	profile_host="\$server2_host"
-	profile_port="\$public_vless_port"
-	profile_security=tls
-	profile_type=xhttp
-	profile_sni="\$direct_host"
-	profile_flow=
+	profile_port="\$public_reality_port"
+	profile_security=reality
+	profile_type=tcp
+	profile_sni=yandex.ru
+	profile_flow=xtls-rprx-vision
 	profile_fp=chrome
-	profile_pbk=
-	profile_sid=
-	profile_path="\$xhttp_path"
+	profile_pbk="\$effective_public_key"
+	profile_sid=a1b2c3d4e5f6a7b8
+	profile_path=
 	
 	cat > "\$server_dir/.env.subscription" <<ENV
 LOG_LEVEL=INFO
@@ -370,8 +396,9 @@ payload = {
     "xray_api_timeout_seconds": 5,
     "command_timeout_seconds": 120,
     "xray_config_path": "/usr/local/etc/xray/config.json",
-    "xray_inbound_tag": "upstream-in",
-    "xray_extra_inbound_tags": ["cdn-ws-in", "xhttp-in"],
+    "xray_inbound_tag": "direct-reality-8443",
+    "xray_extra_inbound_tags": ["upstream-in", "cdn-ws-in", "xhttp-in"],
+    "xray_flow_inbound_tags": ["direct-reality-8443", "upstream-in"],
     "persist_users_in_config": False,
     "vless_flow": "xtls-rprx-vision",
     "expected": expected,
@@ -388,6 +415,7 @@ try:
 finally:
     Path(payload_path).unlink(missing_ok=True)
 PY
+	xray api inboundusercount --server=127.0.0.1:10085 --timeout=5 -tag=direct-reality-8443 --json >/dev/null
 	xray api inboundusercount --server=127.0.0.1:10085 --timeout=5 -tag=upstream-in --json >/dev/null
 	xray api inboundusercount --server=127.0.0.1:10085 --timeout=5 -tag=cdn-ws-in --json >/dev/null
 	xray api inboundusercount --server=127.0.0.1:10085 --timeout=5 -tag=xhttp-in --json >/dev/null
@@ -405,8 +433,8 @@ PY
 	fi
 	for _ in \$(seq 1 20); do
 	  if systemctl is-active --quiet tgvpn-subscription.service \
-	    && grep -q '^VLESS_TYPE=xhttp$' "\$server_dir/.env.subscription" \
-	    && grep -q '^VLESS_SECURITY=tls$' "\$server_dir/.env.subscription" \
+	    && grep -q '^VLESS_TYPE=tcp$' "\$server_dir/.env.subscription" \
+	    && grep -q '^VLESS_SECURITY=reality$' "\$server_dir/.env.subscription" \
 	    && grep -q "^VLESS_PUBLIC_HOST=\${server2_host}\$" "\$server_dir/.env.subscription"; then
 	    break
 	  fi
@@ -484,11 +512,10 @@ certbot "\${certbot_args[@]}"
 
 cp "\$server_dir/deploy/nginx/s2.nnqnn.tech.conf" /etc/nginx/sites-available/tgvpn-subscription.conf
 escaped_xhttp_path="\$(printf '%s' "\$xhttp_path" | sed 's/[\/&]/\\\\&/g')"
-sed -i "s/s2\\.nnqnn\\.tech/\$direct_host/g; s/127\\.0\\.0\\.1:8088/127.0.0.1:\$subscription_port/g; s/127\\.0\\.0\\.1:8443/127.0.0.1:\$nginx_https_backend_port/g; s/127\\.0\\.0\\.1:10087/127.0.0.1:\$xhttp_port/g; s/\\/kvpn-xhttp/\$escaped_xhttp_path/g" /etc/nginx/sites-available/tgvpn-subscription.conf
+sed -i "s/s2\\.nnqnn\\.tech/\$direct_host/g; s/127\\.0\\.0\\.1:8088/127.0.0.1:\$subscription_port/g; s/127\\.0\\.0\\.1:8443/127.0.0.1:\$nginx_https_backend_port/g; s/127\\.0\\.0\\.1:18443/127.0.0.1:\$nginx_https_backend_port/g; s/127\\.0\\.0\\.1:10087/127.0.0.1:\$xhttp_port/g; s/\\/kvpn-xhttp/\$escaped_xhttp_path/g" /etc/nginx/sites-available/tgvpn-subscription.conf
 ln -sf /etc/nginx/sites-available/tgvpn-subscription.conf /etc/nginx/sites-enabled/tgvpn-subscription.conf
 rm -f /etc/nginx/sites-enabled/tgvpn-subscription-bootstrap.conf
-if [[ "\$public_vless_port" == "443" ]]; then
-  cat > /etc/nginx/stream-conf.d/tgvpn-sni.conf <<NGINX
+cat > /etc/nginx/stream-conf.d/tgvpn-sni.conf <<NGINX
 stream {
     map \\\$ssl_preread_server_name \\\$tgvpn_backend {
         \$direct_host 127.0.0.1:\$nginx_https_backend_port;
@@ -504,15 +531,10 @@ stream {
     }
 }
 NGINX
-else
-  rm -f /etc/nginx/stream-conf.d/tgvpn-sni.conf
-fi
 nginx -t
 systemctl reload nginx
 curl -fsS "https://\$direct_host/healthz" >/dev/null
-if [[ "\$public_vless_port" == "443" ]]; then
-  timeout 5 bash -c "</dev/tcp/127.0.0.1/\$nginx_https_backend_port"
-fi
+timeout 5 bash -c "</dev/tcp/127.0.0.1/\$nginx_https_backend_port"
 python3 "\$server_dir/scripts/smoke_server2_direct_vless.py"
 REMOTE_NGINX
 fi

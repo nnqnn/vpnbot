@@ -37,6 +37,11 @@ def reconcile(payload: dict[str, Any]) -> dict[str, Any]:
     api_timeout = int(payload.get("xray_api_timeout_seconds") or 5)
     command_timeout = int(payload.get("command_timeout_seconds") or max(api_timeout + 10, 30))
     flow = str(payload.get("vless_flow") or "")
+    raw_flow_tags = payload.get("xray_flow_inbound_tags")
+    if isinstance(raw_flow_tags, list):
+        flow_inbound_tags = {str(tag) for tag in raw_flow_tags if str(tag)}
+    else:
+        flow_inbound_tags = {inbound_tag}
     persist_users_in_config = bool(payload.get("persist_users_in_config", False))
     expected = {str(email): str(user_uuid) for email, user_uuid in (payload.get("expected") or {}).items()}
     managed_emails = {str(email) for email in (payload.get("managed_emails") or [])}
@@ -44,7 +49,7 @@ def reconcile(payload: dict[str, Any]) -> dict[str, Any]:
     config = read_json(config_path)
     config_changed = False
     for tag in inbound_tags:
-        tag_flow = flow if tag == inbound_tag else ""
+        tag_flow = flow if tag in flow_inbound_tags else ""
         if persist_users_in_config:
             changed = sync_managed_clients_in_config(config, inbound_tag=tag, expected=expected, flow=tag_flow)
         else:
@@ -68,7 +73,7 @@ def reconcile(payload: dict[str, Any]) -> dict[str, Any]:
     }
 
     for tag in inbound_tags:
-        tag_flow = flow if tag == inbound_tag else ""
+        tag_flow = flow if tag in flow_inbound_tags else ""
         for email in to_remove:
             ok, detail = remove_runtime_user(
                 xray_bin=xray_bin,

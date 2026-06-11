@@ -425,8 +425,9 @@ sudo systemctl restart tgvpn-bot
 ```text
 Bot/PostgreSQL на server #1 -> snapshot + Xray API по SSH -> server #2
 Пользователь -> s2.nnqnn.tech HTTPS endpoint -> персональная Happ-подписка
-Основной VPN для РФ -> s2.nnqnn.tech:443 -> Nginx HTTPS -> Xray xhttp-in:10087
-Direct fallback -> s2.nnqnn.tech:443 -> nginx stream -> Xray upstream-in:9443
+Основной VPN для РФ -> 89.125.50.96:8443 -> Xray direct-reality-8443
+Старая цепочка -> server #1 -> server #2 upstream-in:9443
+Fallback/debug XHTTP -> s2.nnqnn.tech:443 -> Nginx HTTPS -> Xray xhttp-in:10087
 ```
 
 Server #1 Xray/Apache не нужны для новой подписки и не меняются. Старая цепочка может работать параллельно.
@@ -435,8 +436,9 @@ Server #1 Xray/Apache не нужны для новой подписки и не
 
 ```bash
 XRAY_CONTROL_MODE=ssh_api
-XRAY_INBOUND_TAG=upstream-in
-XRAY_EXTRA_INBOUND_TAGS=cdn-ws-in,xhttp-in
+XRAY_INBOUND_TAG=direct-reality-8443
+XRAY_EXTRA_INBOUND_TAGS=upstream-in,cdn-ws-in,xhttp-in
+XRAY_FLOW_INBOUND_TAGS=direct-reality-8443,upstream-in
 XRAY_CONFIG_PATH=/usr/local/etc/xray/config.json
 XRAY_API_ENABLED=true
 XRAY_API_SERVER=127.0.0.1:10085
@@ -447,15 +449,15 @@ XRAY_REMOTE_KEY_PATH=
 XRAY_REMOTE_PASSWORD=SERVER2_ROOT_PASSWORD_OR_EMPTY_IF_KEY_AUTH
 
 VLESS_PUBLIC_HOST=89.125.50.96
-VLESS_PUBLIC_PORT=443
-VLESS_SECURITY=tls
-VLESS_TYPE=xhttp
-VLESS_SNI=s2.nnqnn.tech
-VLESS_FLOW=
+VLESS_PUBLIC_PORT=8443
+VLESS_SECURITY=reality
+VLESS_TYPE=tcp
+VLESS_SNI=yandex.ru
+VLESS_FLOW=xtls-rprx-vision
 VLESS_FP=chrome
-VLESS_PBK=
-VLESS_SID=
-VLESS_PATH=/kvpn-xhttp
+VLESS_PBK=SERVER2_REALITY_PUBLIC_KEY
+VLESS_SID=a1b2c3d4e5f6a7b8
+VLESS_PATH=
 VLESS_XHTTP_MODE=packet-up
 VLESS_FALLBACK_PUBLIC_HOST=
 VLESS_FALLBACK_PUBLIC_PORT=443
@@ -470,16 +472,18 @@ SUBSCRIPTION_LINKS_ENABLED=true
 SUBSCRIPTION_SNAPSHOT_SYNC_INTERVAL_MINUTES=1
 SUBSCRIPTION_REMOTE_SNAPSHOT_PATH=/var/lib/tgvpn/subscription_snapshot.json
 SUBSCRIPTION_DIRECT_PORT=9443
+SUBSCRIPTION_PUBLIC_REALITY_INBOUND_TAG=direct-reality-8443
+SUBSCRIPTION_PUBLIC_REALITY_PORT=8443
 SUBSCRIPTION_XHTTP_PORT=10087
 SUBSCRIPTION_XHTTP_PATH=/kvpn-xhttp
 SUBSCRIPTION_XHTTP_MODE=packet-up
-SUBSCRIPTION_PUBLIC_VLESS_PORT=443
-SUBSCRIPTION_NGINX_HTTPS_BACKEND_PORT=8443
+SUBSCRIPTION_PUBLIC_VLESS_PORT=8443
+SUBSCRIPTION_NGINX_HTTPS_BACKEND_PORT=18443
 SUBSCRIPTION_ENABLE_CLOUDFLARED=false
 ```
 
 `SUBSCRIPTION_LINKS_ENABLED=true` включает выдачу Happ-ссылок через `s2.nnqnn.tech`.
-Основной Happ-элемент содержит один маршрут: VLESS XHTTP + TLS на `89.125.50.96:443` с SNI `s2.nnqnn.tech` и path `/kvpn-xhttp`. На server #2 Nginx stream по SNI отправляет этот трафик в локальный HTTPS backend, а location `/kvpn-xhttp` проксирует поток в Xray `xhttp-in:10087`. Reality `upstream-in:9443` остается включенным для старой цепочки и диагностики, но новым пользователям в основном профиле не выдается.
+Основной Happ-элемент содержит один маршрут: VLESS Reality TCP Vision на `89.125.50.96:8443` с SNI `yandex.ru`. На server #2 Xray inbound `direct-reality-8443` управляется через API. Reality `upstream-in:9443` остается включенным для старой цепочки `server #1 -> server #2`, а XHTTP `xhttp-in:10087` остается только как fallback/debug.
 
 На server #2:
 
