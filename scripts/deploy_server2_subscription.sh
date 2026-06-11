@@ -232,13 +232,15 @@ cfg = json.loads(Path("/usr/local/etc/xray/config.json").read_text(encoding="utf
 inbound = next(i for i in cfg.get("inbounds", []) if i.get("tag") == "direct-reality-8443")
 private_key = inbound["streamSettings"]["realitySettings"].get("privateKey", "")
 out = subprocess.check_output(["xray", "x25519", "-i", private_key], text=True)
-match = re.search(r"Public key:\\s*(\\S+)", out)
-if match:
-    print(match.group(1))
-    raise SystemExit(0)
-for line in out.splitlines():
-    if "PublicKey" in line and ":" in line:
-        print(line.split(":", 1)[1].strip())
+for pattern in (
+    r"Password\s*\(PublicKey\):\s*(\S+)",
+    r"Password:\s*(\S+)",
+    r"Public key:\s*(\S+)",
+    r"PublicKey:\s*(\S+)",
+):
+    match = re.search(pattern, out)
+    if match:
+        print(match.group(1))
         raise SystemExit(0)
 raise SystemExit("cannot derive REALITY public key")
 PY
@@ -320,6 +322,11 @@ WHITELIST_FETCH_TIMEOUT_SECONDS=4
 WHITELIST_PROFILE_CACHE_PATH=/var/lib/tgvpn/whitelist_profile_cache.json
 ENV
 chmod 600 "\$server_dir/.env.subscription"
+written_pbk="\$(grep -E '^VLESS_PBK=' "\$server_dir/.env.subscription" | head -n1 | cut -d= -f2-)"
+if [[ "\$written_pbk" != "\$effective_public_key" ]]; then
+  echo "VLESS_PBK mismatch after writing .env.subscription" >&2
+  exit 1
+fi
 if [[ -n "\$origin_secret" ]]; then
   printf '%s\n' "\$origin_secret" > /root/tgvpn-origin-secret.txt
   chmod 600 /root/tgvpn-origin-secret.txt
