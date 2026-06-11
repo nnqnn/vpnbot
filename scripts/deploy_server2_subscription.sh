@@ -229,7 +229,7 @@ import json
 import re
 import subprocess
 cfg = json.loads(Path("/usr/local/etc/xray/config.json").read_text(encoding="utf-8"))
-inbound = next(i for i in cfg.get("inbounds", []) if i.get("tag") == "upstream-in")
+inbound = next(i for i in cfg.get("inbounds", []) if i.get("tag") == "direct-reality-8443")
 private_key = inbound["streamSettings"]["realitySettings"].get("privateKey", "")
 out = subprocess.check_output(["xray", "x25519", "-i", private_key], text=True)
 match = re.search(r"Public key:\\s*(\\S+)", out)
