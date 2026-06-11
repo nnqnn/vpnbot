@@ -299,13 +299,13 @@ if [[ "$polling_ready" != "true" ]]; then
 fi
 
 log "Syncing subscription snapshot to server2"
-if ! ".venv/bin/python" scripts/sync_subscription_snapshot.py; then
+if ! ".venv/bin/python" scripts/sync_subscription_snapshot.py </dev/null; then
   rollback "Failed to sync subscription snapshot after deploy."
   exit 1
 fi
 
 log "Syncing Xray runtime users to server2"
-if ! ".venv/bin/python" scripts/resync_xray_runtime.py; then
+if ! ".venv/bin/python" scripts/resync_xray_runtime.py </dev/null; then
   rollback "Failed to sync Xray runtime after deploy."
   exit 1
 fi
