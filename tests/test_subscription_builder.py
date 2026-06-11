@@ -264,7 +264,13 @@ def test_xray_json_response_builds_main_only_profile_without_whitelist_fetch() -
     assert len(configs) == 1
     config = configs[0]
     assert [outbound["tag"] for outbound in config["outbounds"]] == ["proxy", "direct", "block"]
-    assert config["dns"] == {"servers": ["localhost"], "queryStrategy": "UseIPv4"}
+    assert config["dns"] == {
+        "servers": [
+            "https://dns.google/dns-query",
+            "https://cloudflare-dns.com/dns-query",
+        ],
+        "queryStrategy": "UseIPv4",
+    }
     assert config["routing"]["domainStrategy"] == "AsIs"
     assert config["routing"]["rules"][-1] == {"network": "tcp,udp", "outboundTag": "proxy"}
 

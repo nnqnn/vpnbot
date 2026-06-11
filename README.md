@@ -448,14 +448,14 @@ XRAY_REMOTE_PASSWORD=SERVER2_ROOT_PASSWORD_OR_EMPTY_IF_KEY_AUTH
 
 VLESS_PUBLIC_HOST=89.125.50.96
 VLESS_PUBLIC_PORT=443
-VLESS_SECURITY=reality
-VLESS_TYPE=tcp
-VLESS_SNI=yandex.ru
-VLESS_FLOW=xtls-rprx-vision
+VLESS_SECURITY=tls
+VLESS_TYPE=xhttp
+VLESS_SNI=s2.nnqnn.tech
+VLESS_FLOW=
 VLESS_FP=chrome
-VLESS_PBK=SERVER2_REALITY_PUBLIC_KEY
-VLESS_SID=a1b2c3d4e5f6a7b8
-VLESS_PATH=
+VLESS_PBK=
+VLESS_SID=
+VLESS_PATH=/kvpn-xhttp
 VLESS_XHTTP_MODE=packet-up
 VLESS_FALLBACK_PUBLIC_HOST=
 VLESS_FALLBACK_PUBLIC_PORT=443
@@ -479,7 +479,7 @@ SUBSCRIPTION_ENABLE_CLOUDFLARED=false
 ```
 
 `SUBSCRIPTION_LINKS_ENABLED=true` включает выдачу Happ-ссылок через `s2.nnqnn.tech`.
-Основной Happ-элемент содержит один маршрут: VLESS REALITY Vision на `89.125.50.96:443` с SNI `yandex.ru`. На server #2 Nginx stream пропускает SNI `yandex.ru` в Xray `upstream-in`, а HTTPS-подписка `s2.nnqnn.tech` остается отдельным SNI на том же публичном порту. Fallback-и в основном профиле по умолчанию отключены, чтобы Happ не переключал пользователя на нестабильный маршрут.
+Основной Happ-элемент содержит один маршрут: VLESS XHTTP + TLS на `89.125.50.96:443` с SNI `s2.nnqnn.tech` и path `/kvpn-xhttp`. На server #2 Nginx stream по SNI отправляет этот трафик в локальный HTTPS backend, а location `/kvpn-xhttp` проксирует поток в Xray `xhttp-in:10087`. Reality `upstream-in:9443` остается включенным для старой цепочки и диагностики, но новым пользователям в основном профиле не выдается.
 
 На server #2:
 

@@ -225,14 +225,14 @@ fi
 
 	profile_host="\$server2_host"
 	profile_port="\$public_vless_port"
-	profile_security=reality
-	profile_type=tcp
-	profile_sni=yandex.ru
-	profile_flow=xtls-rprx-vision
+	profile_security=tls
+	profile_type=xhttp
+	profile_sni="\$direct_host"
+	profile_flow=
 	profile_fp=chrome
-	profile_pbk="\$effective_public_key"
-	profile_sid=a1b2c3d4e5f6a7b8
-	profile_path=
+	profile_pbk=
+	profile_sid=
+	profile_path="\$xhttp_path"
 	
 	cat > "\$server_dir/.env.subscription" <<ENV
 LOG_LEVEL=INFO
@@ -405,8 +405,8 @@ PY
 	fi
 	for _ in \$(seq 1 20); do
 	  if systemctl is-active --quiet tgvpn-subscription.service \
-	    && grep -q '^VLESS_TYPE=tcp$' "\$server_dir/.env.subscription" \
-	    && grep -q '^VLESS_SECURITY=reality$' "\$server_dir/.env.subscription" \
+	    && grep -q '^VLESS_TYPE=xhttp$' "\$server_dir/.env.subscription" \
+	    && grep -q '^VLESS_SECURITY=tls$' "\$server_dir/.env.subscription" \
 	    && grep -q "^VLESS_PUBLIC_HOST=\${server2_host}\$" "\$server_dir/.env.subscription"; then
 	    break
 	  fi

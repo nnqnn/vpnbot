@@ -424,7 +424,10 @@ def _build_base_client_config(profile: SubscriptionProfile) -> dict[str, Any]:
     return {
         "log": {"loglevel": "warning"},
         "dns": {
-            "servers": ["localhost"],
+            "servers": [
+                "https://dns.google/dns-query",
+                "https://cloudflare-dns.com/dns-query",
+            ],
             "queryStrategy": "UseIPv4",
         },
         "inbounds": [
