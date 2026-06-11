@@ -514,13 +514,13 @@ ln -sf /etc/nginx/sites-available/tgvpn-subscription.conf /etc/nginx/sites-enabl
 rm -f /etc/nginx/sites-enabled/tgvpn-subscription-bootstrap.conf
 cat > /etc/nginx/stream-conf.d/tgvpn-sni.conf <<NGINX
 stream {
-    log_format stream_sni '\$remote_addr [\$time_local] '
-                          'sni="\$ssl_preread_server_name" '
-                          'upstream="\$upstream_addr" '
-                          'status=\$status '
-                          'bytes_sent=\$bytes_sent '
-                          'bytes_received=\$bytes_received '
-                          'session_time=\$session_time';
+    log_format stream_sni '\\\$remote_addr [\\\$time_local] '
+                          'sni="\\\$ssl_preread_server_name" '
+                          'upstream="\\\$upstream_addr" '
+                          'status=\\\$status '
+                          'bytes_sent=\\\$bytes_sent '
+                          'bytes_received=\\\$bytes_received '
+                          'session_time=\\\$session_time';
 
     access_log /var/log/nginx/stream-access.log stream_sni;
 
