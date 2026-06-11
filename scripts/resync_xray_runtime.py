@@ -41,8 +41,9 @@ async def _collect_users(session_maker) -> tuple[list[int], list[tuple[int, str]
 
 async def _run(dry_run: bool, rebuild: bool) -> None:
     settings = get_settings()
-    if settings.xray_control_mode.strip().lower() != "api":
-        raise SystemExit("This script is intended for XRAY_CONTROL_MODE=api.")
+    control_mode = settings.xray_control_mode.strip().lower()
+    if control_mode not in {"api", "ssh_api", "remote_api"}:
+        raise SystemExit("This script is intended for XRAY_CONTROL_MODE=api/ssh_api/remote_api.")
 
     engine = build_engine(settings)
     session_maker = build_session_maker(engine)
