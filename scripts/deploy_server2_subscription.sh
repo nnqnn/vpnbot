@@ -164,6 +164,15 @@ tar -xzf /tmp/tgvpn-server2-subscription.tar.gz
 
 apt-get update >/dev/null
 DEBIAN_FRONTEND=noninteractive apt-get install -y python3-httpx python3-dotenv curl >/dev/null
+printf 'tcp_bbr\n' > /etc/modules-load.d/tgvpn-bbr.conf
+modprobe tcp_bbr 2>/dev/null || true
+cat > /etc/sysctl.d/99-tgvpn-network.conf <<SYSCTL
+net.core.default_qdisc=fq
+net.ipv4.tcp_congestion_control=bbr
+net.ipv4.tcp_mtu_probing=1
+net.ipv4.tcp_fastopen=3
+SYSCTL
+sysctl --system >/dev/null || true
 python3 -m compileall -q app scripts
 
 before_hash="\$(sha256sum "\$xray_config" | awk '{print \$1}')"
