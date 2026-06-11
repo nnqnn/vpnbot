@@ -797,6 +797,21 @@ def test_server2_xray_api_config_preserves_old_chain_client() -> None:
     assert "flow" not in xhttp["settings"]["clients"][0]
     assert any(inbound["tag"] == "api" for inbound in config["inbounds"])
     assert config["routing"]["rules"][0] == {"type": "field", "inboundTag": ["api"], "outboundTag": "api"}
+    assert {
+        "type": "field",
+        "inboundTag": ["cdn-ws-in", "upstream-in", "xhttp-in"],
+        "network": "tcp,udp",
+        "outboundTag": "direct",
+    } in config["routing"]["rules"]
+    assert config["routing"]["domainStrategy"] == "AsIs"
+    assert config["dns"] == {"queryStrategy": "UseIPv4", "servers": ["localhost"]}
+    direct = next(outbound for outbound in config["outbounds"] if outbound["tag"] == "direct")
+    assert direct == {
+        "protocol": "freedom",
+        "tag": "direct",
+        "sendThrough": "0.0.0.0",
+        "settings": {"domainStrategy": "UseIPv4"},
+    }
 
 
 def test_remote_reconcile_config_is_idempotent_and_preserves_unmanaged_clients() -> None:

@@ -81,6 +81,7 @@ def ensure_xray_api(
     private_key: str = "",
 ) -> bool:
     changed = False
+    changed = ensure_ipv4_only_egress(data) or changed
     changed = remove_conflicting_public_migrate_inbound(data, keep_tag=inbound_tag) or changed
     changed = ensure_direct_vless_reality_inbound(
         data,
@@ -138,6 +139,31 @@ def ensure_xray_api(
     if not any(rule.get("inboundTag") == ["api"] and rule.get("outboundTag") == "api" for rule in rules):
         rules.insert(0, api_rule)
         changed = True
+    vpn_inbound_tags = sorted({inbound_tag, cdn_ws_inbound_tag, xhttp_inbound_tag})
+    vpn_direct_rule = {
+        "type": "field",
+        "inboundTag": vpn_inbound_tags,
+        "network": "tcp,udp",
+        "outboundTag": "direct",
+    }
+    existing_vpn_rule = next(
+        (
+            rule
+            for rule in rules
+            if isinstance(rule, dict)
+            and rule.get("outboundTag") == "direct"
+            and rule.get("network") == "tcp,udp"
+            and any(tag in set(rule.get("inboundTag") or []) for tag in vpn_inbound_tags)
+        ),
+        None,
+    )
+    if existing_vpn_rule is None:
+        rules.append(vpn_direct_rule)
+        changed = True
+    elif existing_vpn_rule != vpn_direct_rule:
+        existing_vpn_rule.clear()
+        existing_vpn_rule.update(vpn_direct_rule)
+        changed = True
 
     stats = data.setdefault("stats", {})
     if stats != {}:
@@ -151,6 +177,50 @@ def ensure_xray_api(
         if level0.get(key) is not True:
             level0[key] = True
             changed = True
+
+    return changed
+
+
+def ensure_ipv4_only_egress(data: dict[str, Any]) -> bool:
+    changed = False
+
+    dns = data.setdefault("dns", {})
+    if dns.get("queryStrategy") != "UseIPv4":
+        dns["queryStrategy"] = "UseIPv4"
+        changed = True
+    servers = dns.setdefault("servers", ["localhost"])
+    if servers != ["localhost"]:
+        dns["servers"] = ["localhost"]
+        changed = True
+
+    routing = data.setdefault("routing", {})
+    if routing.get("domainStrategy") != "AsIs":
+        routing["domainStrategy"] = "AsIs"
+        changed = True
+
+    outbounds = data.setdefault("outbounds", [])
+    direct = _find_by_tag(outbounds, "direct")
+    expected_direct = {
+        "protocol": "freedom",
+        "tag": "direct",
+        "sendThrough": "0.0.0.0",
+        "settings": {
+            "domainStrategy": "UseIPv4",
+        },
+    }
+    if direct is None:
+        outbounds.insert(0, expected_direct)
+        changed = True
+    elif _merge_dict(direct, expected_direct):
+        changed = True
+
+    block = _find_by_tag(outbounds, "block")
+    expected_block = {"protocol": "blackhole", "tag": "block"}
+    if block is None:
+        outbounds.append(expected_block)
+        changed = True
+    elif _merge_dict(block, expected_block):
+        changed = True
 
     return changed
 
