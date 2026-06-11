@@ -425,7 +425,7 @@ sudo systemctl restart tgvpn-bot
 ```text
 Bot/PostgreSQL на server #1 -> snapshot + Xray API по SSH -> server #2
 Пользователь -> s2.nnqnn.tech HTTPS endpoint -> персональная Happ-подписка
-Основной VPN для РФ -> 89.125.50.96:8443 -> Xray direct-reality-8443
+Основной VPN для РФ -> 89.125.50.96:443 -> Nginx stream default -> Xray direct-reality-8443:8443
 Старая цепочка -> server #1 -> server #2 upstream-in:9443
 Fallback/debug XHTTP -> s2.nnqnn.tech:443 -> Nginx HTTPS -> Xray xhttp-in:10087
 ```
@@ -449,7 +449,7 @@ XRAY_REMOTE_KEY_PATH=
 XRAY_REMOTE_PASSWORD=SERVER2_ROOT_PASSWORD_OR_EMPTY_IF_KEY_AUTH
 
 VLESS_PUBLIC_HOST=89.125.50.96
-VLESS_PUBLIC_PORT=8443
+VLESS_PUBLIC_PORT=443
 VLESS_SECURITY=reality
 VLESS_TYPE=tcp
 VLESS_SNI=yandex.ru
@@ -477,13 +477,13 @@ SUBSCRIPTION_PUBLIC_REALITY_PORT=8443
 SUBSCRIPTION_XHTTP_PORT=10087
 SUBSCRIPTION_XHTTP_PATH=/kvpn-xhttp
 SUBSCRIPTION_XHTTP_MODE=packet-up
-SUBSCRIPTION_PUBLIC_VLESS_PORT=8443
+SUBSCRIPTION_PUBLIC_VLESS_PORT=443
 SUBSCRIPTION_NGINX_HTTPS_BACKEND_PORT=18443
 SUBSCRIPTION_ENABLE_CLOUDFLARED=false
 ```
 
 `SUBSCRIPTION_LINKS_ENABLED=true` включает выдачу Happ-ссылок через `s2.nnqnn.tech`.
-Основной Happ-элемент содержит один маршрут: VLESS Reality TCP Vision на `89.125.50.96:8443` с SNI `yandex.ru`. На server #2 Xray inbound `direct-reality-8443` управляется через API. Reality `upstream-in:9443` остается включенным для старой цепочки `server #1 -> server #2`, а XHTTP `xhttp-in:10087` остается только как fallback/debug.
+Основной Happ-элемент содержит один маршрут: VLESS Reality TCP Vision на `89.125.50.96:443` с SNI `yandex.ru`. На server #2 Nginx stream отправляет `s2.nnqnn.tech` в локальный HTTPS backend подписки, а весь другой TLS/REALITY трафик на `443` отправляет в Xray `direct-reality-8443` на `127.0.0.1:8443`. Reality `upstream-in:9443` остается включенным для старой цепочки `server #1 -> server #2`, а XHTTP `xhttp-in:10087` остается только как fallback/debug.
 
 На server #2:
 
@@ -493,7 +493,7 @@ TGVPN_SERVER2_PASSWORD="SERVER2_ROOT_PASSWORD" \
 scripts/deploy_server2_subscription.sh
 ```
 
-Для HTTPS origin используйте `deploy/nginx/s2.nnqnn.tech.conf`. DNS `s2.nnqnn.tech` должен быть DNS-only A record на `89.125.50.96`. Deploy настраивает nginx stream: SNI `s2.nnqnn.tech` уходит в локальный HTTPS backend, остальной TLS-трафик на `443` уходит в Xray `9443`.
+Для HTTPS origin используйте `deploy/nginx/s2.nnqnn.tech.conf`. DNS `s2.nnqnn.tech` должен быть DNS-only A record на `89.125.50.96`. Deploy настраивает nginx stream: SNI `s2.nnqnn.tech` уходит в локальный HTTPS backend, остальной TLS/REALITY-трафик на `443` уходит в Xray `8443`.
 
 Cloudflare Quick Tunnel оставлен только как ручной аварийный режим: по умолчанию `SUBSCRIPTION_ENABLE_CLOUDFLARED=false`, deploy останавливает `tgvpn-cloudflared.service` и не дает ему перезаписывать `/home/tgvpn/.env.subscription` на `trycloudflare.com`.
 

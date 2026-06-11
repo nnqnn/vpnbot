@@ -15,7 +15,7 @@ PUBLIC_REALITY_PORT="${SUBSCRIPTION_PUBLIC_REALITY_PORT:-8443}"
 XHTTP_PORT="${SUBSCRIPTION_XHTTP_PORT:-10087}"
 XHTTP_PATH="${SUBSCRIPTION_XHTTP_PATH:-/kvpn-xhttp}"
 XHTTP_MODE="${SUBSCRIPTION_XHTTP_MODE:-packet-up}"
-PUBLIC_VLESS_PORT="${SUBSCRIPTION_PUBLIC_VLESS_PORT:-8443}"
+PUBLIC_VLESS_PORT="${SUBSCRIPTION_PUBLIC_VLESS_PORT:-443}"
 NGINX_HTTPS_BACKEND_PORT="${SUBSCRIPTION_NGINX_HTTPS_BACKEND_PORT:-18443}"
 SUBSCRIPTION_PORT="${SUBSCRIPTION_LISTEN_PORT:-8088}"
 LETSENCRYPT_EMAIL="${LETSENCRYPT_EMAIL:-}"
@@ -190,11 +190,6 @@ if command -v nginx >/dev/null 2>&1; then
       "s/listen 127\\.0\\.0\\.1:8443 ssl http2;/listen 127.0.0.1:\$nginx_https_backend_port ssl http2;/g; s/listen 127\\.0\\.0\\.1:18443 ssl http2;/listen 127.0.0.1:\$nginx_https_backend_port ssl http2;/g" \
       /etc/nginx/sites-available/tgvpn-subscription.conf
   fi
-  if [[ -f /etc/nginx/stream-conf.d/tgvpn-sni.conf ]]; then
-    sed -i \
-      "s/127\\.0\\.0\\.1:8443/127.0.0.1:\$nginx_https_backend_port/g; s/127\\.0\\.0\\.1:18443/127.0.0.1:\$nginx_https_backend_port/g" \
-      /etc/nginx/stream-conf.d/tgvpn-sni.conf
-  fi
   if nginx -t >/dev/null 2>&1; then
     systemctl reload nginx || true
   fi
@@ -251,7 +246,7 @@ if [[ -n "\$public_key" && "\$public_key" != "\$effective_public_key" ]]; then
 fi
 
 	profile_host="\$server2_host"
-	profile_port="\$public_reality_port"
+	profile_port="\$public_vless_port"
 	profile_security=reality
 	profile_type=tcp
 	profile_sni=yandex.ru
@@ -463,6 +458,7 @@ set -Eeuo pipefail
 server_dir="$SERVER2_DIR"
 direct_host="$DIRECT_HOST"
 direct_port="$DIRECT_PORT"
+public_reality_port="$PUBLIC_REALITY_PORT"
 xhttp_port="$XHTTP_PORT"
 xhttp_path="$XHTTP_PATH"
 public_vless_port="$PUBLIC_VLESS_PORT"
@@ -518,17 +514,27 @@ ln -sf /etc/nginx/sites-available/tgvpn-subscription.conf /etc/nginx/sites-enabl
 rm -f /etc/nginx/sites-enabled/tgvpn-subscription-bootstrap.conf
 cat > /etc/nginx/stream-conf.d/tgvpn-sni.conf <<NGINX
 stream {
+    log_format stream_sni '\$remote_addr [\$time_local] '
+                          'sni="\$ssl_preread_server_name" '
+                          'upstream="\$upstream_addr" '
+                          'status=\$status '
+                          'bytes_sent=\$bytes_sent '
+                          'bytes_received=\$bytes_received '
+                          'session_time=\$session_time';
+
+    access_log /var/log/nginx/stream-access.log stream_sni;
+
     map \\\$ssl_preread_server_name \\\$tgvpn_backend {
         \$direct_host 127.0.0.1:\$nginx_https_backend_port;
-        default 127.0.0.1:\$direct_port;
+        default 127.0.0.1:\$public_reality_port;
     }
 
     server {
         listen 443;
         proxy_pass \\\$tgvpn_backend;
         ssl_preread on;
-        proxy_connect_timeout 5s;
-        proxy_timeout 1h;
+        proxy_connect_timeout 10s;
+        proxy_timeout 12h;
     }
 }
 NGINX

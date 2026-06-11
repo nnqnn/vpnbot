@@ -47,7 +47,7 @@ def _profile() -> SubscriptionProfile:
         announce_text="kVPN auto update",
         profile_web_page_url="",
         vless_public_host="89.125.50.96",
-        vless_public_port=8443,
+        vless_public_port=443,
         vless_security="reality",
         vless_type="tcp",
         vless_sni="yandex.ru",
@@ -92,7 +92,7 @@ def test_subscription_response_includes_main_node_for_active_user() -> None:
 
     assert response is not None
     decoded = _decode_body(response.body)
-    assert decoded.startswith("vless://00000000-0000-0000-0000-000000000001@89.125.50.96:8443")
+    assert decoded.startswith("vless://00000000-0000-0000-0000-000000000001@89.125.50.96:443")
     assert "pbk=PUBLIC_KEY" in decoded
     assert response.headers["cache-control"] == "no-store"
     assert response.headers["support-url"] == "https://t.me/support"

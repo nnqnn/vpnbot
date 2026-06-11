@@ -30,7 +30,7 @@ class Settings(BaseSettings):
     payment_ttl_minutes: int = Field(default=60, alias="PAYMENT_TTL_MINUTES")
 
     vless_public_host: str = Field(alias="VLESS_PUBLIC_HOST")
-    vless_public_port: int = Field(default=8443, alias="VLESS_PUBLIC_PORT")
+    vless_public_port: int = Field(default=443, alias="VLESS_PUBLIC_PORT")
     vless_security: str = Field(default="reality", alias="VLESS_SECURITY")
     vless_type: str = Field(default="tcp", alias="VLESS_TYPE")
     vless_sni: str = Field(default="", alias="VLESS_SNI")

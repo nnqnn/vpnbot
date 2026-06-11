@@ -192,7 +192,7 @@ upsert_env_value XRAY_INBOUND_TAG direct-reality-8443
 ensure_csv_env_contains XRAY_EXTRA_INBOUND_TAGS upstream-in cdn-ws-in xhttp-in
 upsert_env_value XRAY_FLOW_INBOUND_TAGS direct-reality-8443,upstream-in
 upsert_env_value VLESS_PUBLIC_HOST 89.125.50.96
-upsert_env_value VLESS_PUBLIC_PORT 8443
+upsert_env_value VLESS_PUBLIC_PORT 443
 upsert_env_value VLESS_SECURITY reality
 upsert_env_value VLESS_TYPE tcp
 upsert_env_value VLESS_SNI yandex.ru
@@ -320,7 +320,7 @@ if ! ".venv/bin/python" scripts/resync_xray_runtime.py </dev/null; then
   exit 1
 fi
 
-log "Verifying exported subscription uses Reality 8443"
+log "Verifying exported subscription uses Reality on public 443"
 token="$(
   ".venv/bin/python" - <<'PY'
 import json
@@ -334,7 +334,7 @@ for token, user in snapshot.get("users", {}).items():
 PY
 )"
 if [[ -z "$token" ]]; then
-  rollback "No active subscription token found for Reality 8443 verification."
+  rollback "No active subscription token found for Reality 443 verification."
   exit 1
 fi
 subscription_body="$(mktemp)"
@@ -367,7 +367,7 @@ stream = proxy.get("streamSettings", {})
 reality = stream.get("realitySettings", {})
 if server.get("address") != "89.125.50.96":
     raise SystemExit(f"unexpected address: {server.get('address')}")
-if int(server.get("port") or 0) != 8443:
+if int(server.get("port") or 0) != 443:
     raise SystemExit(f"unexpected port: {server.get('port')}")
 if stream.get("network") != "tcp":
     raise SystemExit(f"unexpected network: {stream.get('network')}")
@@ -380,7 +380,7 @@ if not users or users[0].get("flow") != "xtls-rprx-vision":
 PY
 then
   rm -f "$subscription_body"
-  rollback "Raw subscription still does not use Reality 8443."
+  rollback "Raw subscription still does not use Reality public 443."
   exit 1
 fi
 rm -f "$subscription_body"

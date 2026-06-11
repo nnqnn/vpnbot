@@ -53,7 +53,7 @@ class RuntimeConfig:
             announce_text=_env("SUBSCRIPTION_ANNOUNCE_TEXT", "kVPN: subscription auto-updates."),
             profile_web_page_url=_env("SUBSCRIPTION_PROFILE_WEB_PAGE_URL", ""),
             vless_public_host=_env("VLESS_PUBLIC_HOST", "89.125.50.96"),
-            vless_public_port=int(_env("VLESS_PUBLIC_PORT", "8443")),
+            vless_public_port=int(_env("VLESS_PUBLIC_PORT", "443")),
             vless_security=_env("VLESS_SECURITY", "reality"),
             vless_type=_env("VLESS_TYPE", "tcp"),
             vless_sni=_env("VLESS_SNI", "yandex.ru"),
