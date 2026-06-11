@@ -203,6 +203,8 @@ python3 "\$server_dir/scripts/configure_server2_xray_api.py" \
 	  --direct-port "\$direct_port" \
 	  --public-reality-inbound-tag "\$public_reality_inbound_tag" \
 	  --public-reality-port "\$public_reality_port" \
+	  --public-reality-server-name yandex.ru \
+	  --public-reality-dest yandex.ru:443 \
 	  --cdn-ws-inbound-tag cdn-ws-in \
 	  --cdn-ws-port 10086 \
 	  --cdn-ws-path /kvpn-ws \

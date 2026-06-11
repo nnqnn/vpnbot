@@ -17,6 +17,8 @@ def main() -> None:
     parser.add_argument("--direct-port", type=int, default=9443)
     parser.add_argument("--public-reality-inbound-tag", default="direct-reality-8443")
     parser.add_argument("--public-reality-port", type=int, default=8443)
+    parser.add_argument("--public-reality-server-name", action="append", default=None)
+    parser.add_argument("--public-reality-dest", default="yandex.ru:443")
     parser.add_argument("--cdn-ws-inbound-tag", default="cdn-ws-in")
     parser.add_argument("--cdn-ws-port", type=int, default=10086)
     parser.add_argument("--cdn-ws-path", default="/kvpn-ws")
@@ -39,6 +41,8 @@ def main() -> None:
         direct_port=args.direct_port,
         public_reality_inbound_tag=args.public_reality_inbound_tag,
         public_reality_port=args.public_reality_port,
+        public_reality_server_names=args.public_reality_server_name,
+        public_reality_dest=args.public_reality_dest,
         cdn_ws_inbound_tag=args.cdn_ws_inbound_tag,
         cdn_ws_port=args.cdn_ws_port,
         cdn_ws_path=args.cdn_ws_path,
@@ -74,6 +78,8 @@ def ensure_xray_api(
     direct_port: int = 9443,
     public_reality_inbound_tag: str = "direct-reality-8443",
     public_reality_port: int = 8443,
+    public_reality_server_names: list[str] | None = None,
+    public_reality_dest: str = "yandex.ru:443",
     cdn_ws_inbound_tag: str = "cdn-ws-in",
     cdn_ws_port: int = 10086,
     cdn_ws_path: str = "/kvpn-ws",
@@ -102,10 +108,12 @@ def ensure_xray_api(
         data,
         inbound_tag=public_reality_inbound_tag,
         direct_port=public_reality_port,
-        server_names=server_names or ["www.cloudflare.com", "yandex.ru"],
+        server_names=public_reality_server_names or ["yandex.ru"],
         short_id=short_id,
         flow=flow,
         private_key=private_key,
+        dest=public_reality_dest,
+        replace_server_names=True,
     ) or changed
     changed = ensure_cdn_vless_ws_inbound(
         data,
@@ -417,6 +425,8 @@ def ensure_direct_vless_reality_inbound(
     short_id: str,
     flow: str,
     private_key: str,
+    dest: str | None = None,
+    replace_server_names: bool = False,
 ) -> bool:
     changed = False
     inbounds = data.setdefault("inbounds", [])
@@ -443,7 +453,7 @@ def ensure_direct_vless_reality_inbound(
                 "tcpSettings": {},
                 "realitySettings": {
                     "show": False,
-                    "dest": "www.yandex.ru:443",
+                    "dest": dest or "www.yandex.ru:443",
                     "serverNames": sorted(set(server_names)),
                     "privateKey": private_key,
                     "shortIds": [short_id],
@@ -480,16 +490,27 @@ def ensure_direct_vless_reality_inbound(
             raise ValueError(f"Inbound '{inbound_tag}' has no REALITY privateKey and --private-key was not provided.")
         reality["privateKey"] = private_key
         changed = True
-    if not reality.get("target") and not reality.get("dest"):
+    if dest:
+        if reality.get("dest") != dest:
+            reality["dest"] = dest
+            changed = True
+        if "target" in reality:
+            reality.pop("target", None)
+            changed = True
+    elif not reality.get("target") and not reality.get("dest"):
         reality["dest"] = "www.yandex.ru:443"
         changed = True
 
     existing_names = reality.get("serverNames")
     if not isinstance(existing_names, list):
         existing_names = []
-    merged_names = sorted({str(name) for name in existing_names + server_names if str(name)})
-    if reality.get("serverNames") != merged_names:
-        reality["serverNames"] = merged_names
+    next_names = (
+        sorted({str(name) for name in server_names if str(name)})
+        if replace_server_names
+        else sorted({str(name) for name in existing_names + server_names if str(name)})
+    )
+    if reality.get("serverNames") != next_names:
+        reality["serverNames"] = next_names
         changed = True
 
     existing_short_ids = reality.get("shortIds")

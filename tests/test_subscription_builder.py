@@ -817,7 +817,8 @@ def test_server2_xray_api_config_preserves_old_chain_client() -> None:
     assert direct_reality["streamSettings"]["network"] == "tcp"
     assert direct_reality["streamSettings"]["security"] == "reality"
     assert direct_reality["streamSettings"]["realitySettings"]["privateKey"] == "PRIVATE_KEY"
-    assert "yandex.ru" in direct_reality["streamSettings"]["realitySettings"]["serverNames"]
+    assert direct_reality["streamSettings"]["realitySettings"]["dest"] == "yandex.ru:443"
+    assert direct_reality["streamSettings"]["realitySettings"]["serverNames"] == ["yandex.ru"]
     cdn_ws = next(inbound for inbound in config["inbounds"] if inbound["tag"] == "cdn-ws-in")
     assert cdn_ws["listen"] == "127.0.0.1"
     assert cdn_ws["port"] == 10086
