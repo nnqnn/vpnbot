@@ -231,7 +231,7 @@ def test_xray_json_response_separates_main_and_whitelist_profiles_for_full_acces
     assert isinstance(configs, list)
     assert len(configs) == 2
     main_config, whitelist_config = configs
-    assert main_config["remarks"] == "Основной #1 🇳🇱"
+    assert main_config["remarks"] == "Запасной #3 🇳🇱"
     assert main_config["outbounds"][0]["tag"] == "proxy"
     assert main_config["outbounds"][0]["settings"]["vnext"][0]["address"] == "89.125.50.96"
     assert main_config["outbounds"][0]["streamSettings"]["realitySettings"]["serverName"] == "www.yandex.ru"
@@ -472,10 +472,10 @@ def test_xray_json_response_adds_separate_main_fallback_profiles_with_whitelist(
     assert response is not None
     configs = json.loads(response.body)
     assert [config["remarks"] for config in configs] == [
+        "Запасной #3 🇳🇱",
+        "Запасной #1 🇳🇱",
+        "Запасной #2 🇳🇱",
         "Основной #1 🇳🇱",
-        "Основной #2 🇳🇱",
-        "Основной #3 🇳🇱",
-        "Основной #4 🇳🇱",
         "Обход белых списков",
     ]
     noflow = configs[1]["outbounds"][0]

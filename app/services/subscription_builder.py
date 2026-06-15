@@ -474,7 +474,7 @@ def _build_main_profile_configs(
         configs.append(
             _build_single_outbound_main_config(
                 profile,
-                remarks="Основной #2 🇳🇱",
+                remarks="Запасной #1 🇳🇱",
                 outbound=noflow_outbound,
                 server_host=profile.noflow_vless_public_host,
             )
@@ -485,7 +485,7 @@ def _build_main_profile_configs(
         configs.append(
             _build_single_outbound_main_config(
                 profile,
-                remarks="Основной #3 🇳🇱",
+                remarks="Запасной #2 🇳🇱",
                 outbound=xhttp_outbound,
                 server_host=profile.xhttp_vless_public_host,
             )
@@ -496,7 +496,7 @@ def _build_main_profile_configs(
         configs.append(
             _build_single_outbound_main_config(
                 profile,
-                remarks="Основной #4 🇳🇱",
+                remarks="Основной #1 🇳🇱",
                 outbound=hysteria2_outbound,
                 server_host=profile.hysteria2_public_host,
             )
@@ -689,7 +689,7 @@ def _build_single_main_config(
     bridge_profile: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     config = _build_base_client_config(profile)
-    config["remarks"] = "Основной #1 🇳🇱"
+    config["remarks"] = "Запасной #3 🇳🇱"
     primary_outbound = build_main_xray_outbound(user, profile, tag="proxy")
     fallback_outbound = build_fallback_xray_outbound(user, profile, tag="proxy-direct")
     legacy_outbound = build_legacy_xray_outbound(user, profile, tag="proxy-legacy")

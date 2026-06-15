@@ -363,7 +363,7 @@ from pathlib import Path
 configs = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
 if not isinstance(configs, list):
     raise SystemExit("subscription body is not a profile list")
-main = next((item for item in configs if isinstance(item, dict) and item.get("remarks") == "Основной #1 🇳🇱"), None)
+main = next((item for item in configs if isinstance(item, dict) and item.get("remarks") == "Запасной #3 🇳🇱"), None)
 if main is None:
     raise SystemExit("main VPN profile was not found")
 outbounds = main.get("outbounds")
@@ -391,9 +391,9 @@ if not users or users[0].get("flow") != "xtls-rprx-vision":
     raise SystemExit("main user flow is not xtls-rprx-vision")
 remarks = {str(item.get("remarks")) for item in configs if isinstance(item, dict)}
 required_remarks = {
-    "Основной #2 🇳🇱",
-    "Основной #3 🇳🇱",
-    "Основной #4 🇳🇱",
+    "Основной #1 🇳🇱",
+    "Запасной #1 🇳🇱",
+    "Запасной #2 🇳🇱",
 }
 for remark in required_remarks:
     if remark not in remarks:
