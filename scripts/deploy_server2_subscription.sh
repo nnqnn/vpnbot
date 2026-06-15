@@ -11,12 +11,20 @@ SERVER2_DIR="${SUBSCRIPTION_SERVER2_DIR:-/home/tgvpn}"
 DIRECT_HOST="${SUBSCRIPTION_DIRECT_HOST:-s2.nnqnn.tech}"
 DIRECT_PORT="${SUBSCRIPTION_DIRECT_PORT:-9443}"
 PUBLIC_REALITY_INBOUND_TAG="${SUBSCRIPTION_PUBLIC_REALITY_INBOUND_TAG:-direct-reality-8443}"
-PUBLIC_REALITY_PORT="${SUBSCRIPTION_PUBLIC_REALITY_PORT:-8443}"
+PUBLIC_REALITY_PORT="${SUBSCRIPTION_PUBLIC_REALITY_PORT:-443}"
+NOFLOW_REALITY_INBOUND_TAG="${SUBSCRIPTION_NOFLOW_REALITY_INBOUND_TAG:-direct-reality-noflow-8443}"
+NOFLOW_REALITY_PORT="${SUBSCRIPTION_NOFLOW_REALITY_PORT:-8443}"
 XHTTP_PORT="${SUBSCRIPTION_XHTTP_PORT:-10087}"
 XHTTP_PATH="${SUBSCRIPTION_XHTTP_PATH:-/kvpn-xhttp}"
 XHTTP_MODE="${SUBSCRIPTION_XHTTP_MODE:-packet-up}"
+HYSTERIA2_INBOUND_TAG="${SUBSCRIPTION_HYSTERIA2_INBOUND_TAG:-hysteria2-udp-443}"
+HYSTERIA2_PORT="${SUBSCRIPTION_HYSTERIA2_PORT:-443}"
+HYSTERIA2_CERT_FILE="${SUBSCRIPTION_HYSTERIA2_CERT_FILE:-/etc/letsencrypt/live/s2.nnqnn.tech/fullchain.pem}"
+HYSTERIA2_KEY_FILE="${SUBSCRIPTION_HYSTERIA2_KEY_FILE:-/etc/letsencrypt/live/s2.nnqnn.tech/privkey.pem}"
+HYSTERIA2_MASQUERADE_URL="${SUBSCRIPTION_HYSTERIA2_MASQUERADE_URL:-https://www.yandex.ru/}"
 PUBLIC_VLESS_PORT="${SUBSCRIPTION_PUBLIC_VLESS_PORT:-443}"
 NGINX_HTTPS_BACKEND_PORT="${SUBSCRIPTION_NGINX_HTTPS_BACKEND_PORT:-18443}"
+NGINX_HTTPS_PUBLIC_PORT="${SUBSCRIPTION_NGINX_HTTPS_PUBLIC_PORT:-8444}"
 SUBSCRIPTION_PORT="${SUBSCRIPTION_LISTEN_PORT:-8088}"
 LETSENCRYPT_EMAIL="${LETSENCRYPT_EMAIL:-}"
 ORIGIN_SECRET="${SUBSCRIPTION_ORIGIN_SECRET:-}"
@@ -84,11 +92,19 @@ load_optional_env SUBSCRIPTION_DIRECT_HOST
 load_optional_env SUBSCRIPTION_DIRECT_PORT
 load_optional_env SUBSCRIPTION_PUBLIC_REALITY_INBOUND_TAG
 load_optional_env SUBSCRIPTION_PUBLIC_REALITY_PORT
+load_optional_env SUBSCRIPTION_NOFLOW_REALITY_INBOUND_TAG
+load_optional_env SUBSCRIPTION_NOFLOW_REALITY_PORT
 load_optional_env SUBSCRIPTION_XHTTP_PORT
 load_optional_env SUBSCRIPTION_XHTTP_PATH
 load_optional_env SUBSCRIPTION_XHTTP_MODE
+load_optional_env SUBSCRIPTION_HYSTERIA2_INBOUND_TAG
+load_optional_env SUBSCRIPTION_HYSTERIA2_PORT
+load_optional_env SUBSCRIPTION_HYSTERIA2_CERT_FILE
+load_optional_env SUBSCRIPTION_HYSTERIA2_KEY_FILE
+load_optional_env SUBSCRIPTION_HYSTERIA2_MASQUERADE_URL
 load_optional_env SUBSCRIPTION_PUBLIC_VLESS_PORT
 load_optional_env SUBSCRIPTION_NGINX_HTTPS_BACKEND_PORT
+load_optional_env SUBSCRIPTION_NGINX_HTTPS_PUBLIC_PORT
 load_optional_env LETSENCRYPT_EMAIL
 
 SERVER2_HOST="${SUBSCRIPTION_SERVER2_HOST:-$SERVER2_HOST}"
@@ -98,11 +114,19 @@ DIRECT_HOST="${SUBSCRIPTION_DIRECT_HOST:-$DIRECT_HOST}"
 DIRECT_PORT="${SUBSCRIPTION_DIRECT_PORT:-$DIRECT_PORT}"
 PUBLIC_REALITY_INBOUND_TAG="${SUBSCRIPTION_PUBLIC_REALITY_INBOUND_TAG:-$PUBLIC_REALITY_INBOUND_TAG}"
 PUBLIC_REALITY_PORT="${SUBSCRIPTION_PUBLIC_REALITY_PORT:-$PUBLIC_REALITY_PORT}"
+NOFLOW_REALITY_INBOUND_TAG="${SUBSCRIPTION_NOFLOW_REALITY_INBOUND_TAG:-$NOFLOW_REALITY_INBOUND_TAG}"
+NOFLOW_REALITY_PORT="${SUBSCRIPTION_NOFLOW_REALITY_PORT:-$NOFLOW_REALITY_PORT}"
 XHTTP_PORT="${SUBSCRIPTION_XHTTP_PORT:-$XHTTP_PORT}"
 XHTTP_PATH="${SUBSCRIPTION_XHTTP_PATH:-$XHTTP_PATH}"
 XHTTP_MODE="${SUBSCRIPTION_XHTTP_MODE:-$XHTTP_MODE}"
+HYSTERIA2_INBOUND_TAG="${SUBSCRIPTION_HYSTERIA2_INBOUND_TAG:-$HYSTERIA2_INBOUND_TAG}"
+HYSTERIA2_PORT="${SUBSCRIPTION_HYSTERIA2_PORT:-$HYSTERIA2_PORT}"
+HYSTERIA2_CERT_FILE="${SUBSCRIPTION_HYSTERIA2_CERT_FILE:-$HYSTERIA2_CERT_FILE}"
+HYSTERIA2_KEY_FILE="${SUBSCRIPTION_HYSTERIA2_KEY_FILE:-$HYSTERIA2_KEY_FILE}"
+HYSTERIA2_MASQUERADE_URL="${SUBSCRIPTION_HYSTERIA2_MASQUERADE_URL:-$HYSTERIA2_MASQUERADE_URL}"
 PUBLIC_VLESS_PORT="${SUBSCRIPTION_PUBLIC_VLESS_PORT:-$PUBLIC_VLESS_PORT}"
 NGINX_HTTPS_BACKEND_PORT="${SUBSCRIPTION_NGINX_HTTPS_BACKEND_PORT:-$NGINX_HTTPS_BACKEND_PORT}"
+NGINX_HTTPS_PUBLIC_PORT="${SUBSCRIPTION_NGINX_HTTPS_PUBLIC_PORT:-$NGINX_HTTPS_PUBLIC_PORT}"
 LETSENCRYPT_EMAIL="${LETSENCRYPT_EMAIL:-$LETSENCRYPT_EMAIL}"
 ORIGIN_SECRET="${SUBSCRIPTION_ORIGIN_SECRET:-$ORIGIN_SECRET}"
 REQUIRE_ORIGIN_SECRET="${SUBSCRIPTION_REQUIRE_ORIGIN_SECRET:-$REQUIRE_ORIGIN_SECRET}"
@@ -155,11 +179,19 @@ direct_host="$DIRECT_HOST"
 direct_port="$DIRECT_PORT"
 public_reality_inbound_tag="$PUBLIC_REALITY_INBOUND_TAG"
 public_reality_port="$PUBLIC_REALITY_PORT"
+noflow_reality_inbound_tag="$NOFLOW_REALITY_INBOUND_TAG"
+noflow_reality_port="$NOFLOW_REALITY_PORT"
 xhttp_port="$XHTTP_PORT"
 xhttp_path="$XHTTP_PATH"
 xhttp_mode="$XHTTP_MODE"
+hysteria2_inbound_tag="$HYSTERIA2_INBOUND_TAG"
+hysteria2_port="$HYSTERIA2_PORT"
+hysteria2_cert_file="$HYSTERIA2_CERT_FILE"
+hysteria2_key_file="$HYSTERIA2_KEY_FILE"
+hysteria2_masquerade_url="$HYSTERIA2_MASQUERADE_URL"
 public_vless_port="$PUBLIC_VLESS_PORT"
 nginx_https_backend_port="$NGINX_HTTPS_BACKEND_PORT"
+nginx_https_public_port="$NGINX_HTTPS_PUBLIC_PORT"
 subscription_port="$SUBSCRIPTION_PORT"
 origin_secret="$ORIGIN_SECRET"
 public_key="$PUBLIC_KEY"
@@ -189,6 +221,9 @@ if command -v nginx >/dev/null 2>&1; then
     sed -i \
       "s/listen 127\\.0\\.0\\.1:8443 ssl http2;/listen 127.0.0.1:\$nginx_https_backend_port ssl http2;/g; s/listen 127\\.0\\.0\\.1:18443 ssl http2;/listen 127.0.0.1:\$nginx_https_backend_port ssl http2;/g" \
       /etc/nginx/sites-available/tgvpn-subscription.conf
+    if ! grep -q "listen \$nginx_https_public_port ssl http2;" /etc/nginx/sites-available/tgvpn-subscription.conf; then
+      sed -i "/listen 127\\.0\\.0\\.1:\$nginx_https_backend_port ssl http2;/a\\    listen \$nginx_https_public_port ssl http2;" /etc/nginx/sites-available/tgvpn-subscription.conf
+    fi
   fi
   if nginx -t >/dev/null 2>&1; then
     systemctl reload nginx || true
@@ -203,8 +238,14 @@ python3 "\$server_dir/scripts/configure_server2_xray_api.py" \
 	  --direct-port "\$direct_port" \
 	  --public-reality-inbound-tag "\$public_reality_inbound_tag" \
 	  --public-reality-port "\$public_reality_port" \
+	  --public-reality-server-name www.yandex.ru \
 	  --public-reality-server-name yandex.ru \
-	  --public-reality-dest yandex.ru:443 \
+	  --public-reality-dest www.yandex.ru:443 \
+	  --noflow-reality-inbound-tag "\$noflow_reality_inbound_tag" \
+	  --noflow-reality-port "\$noflow_reality_port" \
+	  --noflow-reality-server-name www.yandex.ru \
+	  --noflow-reality-server-name yandex.ru \
+	  --noflow-reality-dest www.yandex.ru:443 \
 	  --cdn-ws-inbound-tag cdn-ws-in \
 	  --cdn-ws-port 10086 \
 	  --cdn-ws-path /kvpn-ws \
@@ -212,7 +253,13 @@ python3 "\$server_dir/scripts/configure_server2_xray_api.py" \
 	  --xhttp-port "\$xhttp_port" \
 	  --xhttp-path "\$xhttp_path" \
 	  --xhttp-mode "\$xhttp_mode" \
-	  --server-name www.cloudflare.com \
+	  --hysteria2-inbound-tag "\$hysteria2_inbound_tag" \
+	  --hysteria2-port "\$hysteria2_port" \
+	  --hysteria2-cert-file "\$hysteria2_cert_file" \
+	  --hysteria2-key-file "\$hysteria2_key_file" \
+	  --hysteria2-masquerade-url "\$hysteria2_masquerade_url" \
+  --server-name www.cloudflare.com \
+  --server-name www.yandex.ru \
   --server-name yandex.ru \
   --short-id a1b2c3d4e5f6a7b8 \
   --flow xtls-rprx-vision \
@@ -253,7 +300,7 @@ fi
 	profile_port="\$public_vless_port"
 	profile_security=reality
 	profile_type=tcp
-	profile_sni=yandex.ru
+	profile_sni=www.yandex.ru
 	profile_flow=xtls-rprx-vision
 	profile_fp=chrome
 	profile_pbk="\$effective_public_key"
@@ -268,7 +315,7 @@ SUBSCRIPTION_SNAPSHOT_PATH=/var/lib/tgvpn/subscription_snapshot.json
 SUBSCRIPTION_ORIGIN_SECRET=\$origin_secret
 SUBSCRIPTION_RESPONSE_FORMAT=xray_json
 SUBSCRIPTION_PRODUCT=kVPN
-SUBSCRIPTION_PUBLIC_BASE_URL=https://\$direct_host
+SUBSCRIPTION_PUBLIC_BASE_URL=https://\$direct_host:\$nginx_https_public_port
 SUBSCRIPTION_PROFILE_TITLE=kVPN @kkVPNrobot
 SUBSCRIPTION_UPDATE_INTERVAL_HOURS=1
 SUBSCRIPTION_TRAFFIC_TOTAL_BYTES=0
@@ -299,6 +346,29 @@ VLESS_FALLBACK_PBK=
 VLESS_FALLBACK_SID=a1b2c3d4e5f6a7b8
 VLESS_FALLBACK_PATH=
 VLESS_FALLBACK_XHTTP_MODE=packet-up
+VLESS_NOFLOW_PUBLIC_HOST=\$server2_host
+VLESS_NOFLOW_PUBLIC_PORT=\$noflow_reality_port
+VLESS_NOFLOW_SECURITY=reality
+VLESS_NOFLOW_TYPE=tcp
+VLESS_NOFLOW_SNI=www.yandex.ru
+VLESS_NOFLOW_FP=chrome
+VLESS_NOFLOW_PBK=\$effective_public_key
+VLESS_NOFLOW_SID=a1b2c3d4e5f6a7b8
+VLESS_NOFLOW_PATH=
+VLESS_NOFLOW_XHTTP_MODE=packet-up
+VLESS_XHTTP_PUBLIC_HOST=\$direct_host
+VLESS_XHTTP_PUBLIC_PORT=\$nginx_https_public_port
+VLESS_XHTTP_SECURITY=tls
+VLESS_XHTTP_TYPE=xhttp
+VLESS_XHTTP_SNI=\$direct_host
+VLESS_XHTTP_FP=chrome
+VLESS_XHTTP_PATH=\$xhttp_path
+VLESS_XHTTP_XHTTP_MODE=\$xhttp_mode
+HYSTERIA2_PUBLIC_HOST=\$server2_host
+HYSTERIA2_PUBLIC_PORT=\$hysteria2_port
+HYSTERIA2_SNI=\$direct_host
+HYSTERIA2_FP=chrome
+HYSTERIA2_UDP_IDLE_TIMEOUT=60
 VLESS_LEGACY_PUBLIC_HOST=
 VLESS_LEGACY_PUBLIC_PORT=8443
 VLESS_LEGACY_SECURITY=reality
@@ -359,6 +429,14 @@ if [[ "\${subscription_ready:-false}" != "true" ]]; then
   exit 1
 fi
 
+if command -v nginx >/dev/null 2>&1; then
+  if [[ -f /etc/nginx/stream-conf.d/tgvpn-sni.conf ]]; then
+    mv /etc/nginx/stream-conf.d/tgvpn-sni.conf "/etc/nginx/stream-conf.d/tgvpn-sni.conf.disabled-\$(date +%Y%m%d%H%M%S)"
+  fi
+  nginx -t
+  systemctl reload nginx || true
+fi
+
 if [[ "\$xray_config_changed" == "true" || "\$restart_xray" == "true" ]]; then
   echo "restarting xray after config change or explicit request"
   systemctl restart xray
@@ -402,7 +480,7 @@ payload = {
     "command_timeout_seconds": 120,
     "xray_config_path": "/usr/local/etc/xray/config.json",
     "xray_inbound_tag": "direct-reality-8443",
-    "xray_extra_inbound_tags": ["upstream-in", "cdn-ws-in", "xhttp-in"],
+    "xray_extra_inbound_tags": ["upstream-in", "cdn-ws-in", "xhttp-in", "direct-reality-noflow-8443", "hysteria2-udp-443"],
     "xray_flow_inbound_tags": ["direct-reality-8443", "upstream-in"],
     "persist_users_in_config": False,
     "vless_flow": "xtls-rprx-vision",
@@ -424,6 +502,8 @@ PY
 	xray api inboundusercount --server=127.0.0.1:10085 --timeout=5 -tag=upstream-in --json >/dev/null
 	xray api inboundusercount --server=127.0.0.1:10085 --timeout=5 -tag=cdn-ws-in --json >/dev/null
 	xray api inboundusercount --server=127.0.0.1:10085 --timeout=5 -tag=xhttp-in --json >/dev/null
+	xray api inboundusercount --server=127.0.0.1:10085 --timeout=5 -tag=direct-reality-noflow-8443 --json >/dev/null
+	xray api inboundusercount --server=127.0.0.1:10085 --timeout=5 -tag=hysteria2-udp-443 --json >/dev/null
 	if [[ "\$enable_cloudflared" == "true" ]]; then
 	  if ! command -v cloudflared >/dev/null 2>&1; then
 	    curl -fsSL -o /tmp/cloudflared-linux-amd64.deb \
@@ -472,6 +552,7 @@ xhttp_port="$XHTTP_PORT"
 xhttp_path="$XHTTP_PATH"
 public_vless_port="$PUBLIC_VLESS_PORT"
 nginx_https_backend_port="$NGINX_HTTPS_BACKEND_PORT"
+nginx_https_public_port="$NGINX_HTTPS_PUBLIC_PORT"
 subscription_port="$SUBSCRIPTION_PORT"
 letsencrypt_email="$LETSENCRYPT_EMAIL"
 
@@ -519,37 +600,17 @@ certbot "\${certbot_args[@]}"
 cp "\$server_dir/deploy/nginx/s2.nnqnn.tech.conf" /etc/nginx/sites-available/tgvpn-subscription.conf
 escaped_xhttp_path="\$(printf '%s' "\$xhttp_path" | sed 's/[\/&]/\\\\&/g')"
 sed -i "s/s2\\.nnqnn\\.tech/\$direct_host/g; s/127\\.0\\.0\\.1:8088/127.0.0.1:\$subscription_port/g; s/127\\.0\\.0\\.1:8443/127.0.0.1:\$nginx_https_backend_port/g; s/127\\.0\\.0\\.1:18443/127.0.0.1:\$nginx_https_backend_port/g; s/127\\.0\\.0\\.1:10087/127.0.0.1:\$xhttp_port/g; s/\\/kvpn-xhttp/\$escaped_xhttp_path/g" /etc/nginx/sites-available/tgvpn-subscription.conf
+if ! grep -q "listen \$nginx_https_public_port ssl http2;" /etc/nginx/sites-available/tgvpn-subscription.conf; then
+  sed -i "/listen 127\\.0\\.0\\.1:\$nginx_https_backend_port ssl http2;/a\\    listen \$nginx_https_public_port ssl http2;" /etc/nginx/sites-available/tgvpn-subscription.conf
+fi
 ln -sf /etc/nginx/sites-available/tgvpn-subscription.conf /etc/nginx/sites-enabled/tgvpn-subscription.conf
 rm -f /etc/nginx/sites-enabled/tgvpn-subscription-bootstrap.conf
-cat > /etc/nginx/stream-conf.d/tgvpn-sni.conf <<NGINX
-stream {
-    log_format stream_sni '\\\$remote_addr [\\\$time_local] '
-                          'sni="\\\$ssl_preread_server_name" '
-                          'upstream="\\\$upstream_addr" '
-                          'status=\\\$status '
-                          'bytes_sent=\\\$bytes_sent '
-                          'bytes_received=\\\$bytes_received '
-                          'session_time=\\\$session_time';
-
-    access_log /var/log/nginx/stream-access.log stream_sni;
-
-    map \\\$ssl_preread_server_name \\\$tgvpn_backend {
-        \$direct_host 127.0.0.1:\$nginx_https_backend_port;
-        default 127.0.0.1:\$public_reality_port;
-    }
-
-    server {
-        listen 443;
-        proxy_pass \\\$tgvpn_backend;
-        ssl_preread on;
-        proxy_connect_timeout 10s;
-        proxy_timeout 12h;
-    }
-}
-NGINX
+if [[ -f /etc/nginx/stream-conf.d/tgvpn-sni.conf ]]; then
+  mv /etc/nginx/stream-conf.d/tgvpn-sni.conf "/etc/nginx/stream-conf.d/tgvpn-sni.conf.disabled-\$(date +%Y%m%d%H%M%S)"
+fi
 nginx -t
 systemctl reload nginx
-curl -fsS "https://\$direct_host/healthz" >/dev/null
+curl -fsS "https://\$direct_host:\$nginx_https_public_port/healthz" >/dev/null
 timeout 5 bash -c "</dev/tcp/127.0.0.1/\$nginx_https_backend_port"
 python3 "\$server_dir/scripts/smoke_server2_direct_vless.py"
 REMOTE_NGINX

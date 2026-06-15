@@ -4,6 +4,7 @@ import base64
 import json
 from copy import deepcopy
 from dataclasses import dataclass
+from ipaddress import ip_address
 from typing import Any
 from urllib.parse import quote, unquote, urlencode, urlsplit
 
@@ -46,6 +47,29 @@ class SubscriptionProfile:
     fallback_vless_sid: str = "a1b2c3d4e5f6a7b8"
     fallback_vless_path: str = ""
     fallback_vless_xhttp_mode: str = "packet-up"
+    noflow_vless_public_host: str = ""
+    noflow_vless_public_port: int = 8443
+    noflow_vless_security: str = "reality"
+    noflow_vless_type: str = "tcp"
+    noflow_vless_sni: str = "www.yandex.ru"
+    noflow_vless_fp: str = "chrome"
+    noflow_vless_pbk: str = ""
+    noflow_vless_sid: str = "a1b2c3d4e5f6a7b8"
+    noflow_vless_path: str = ""
+    noflow_vless_xhttp_mode: str = "packet-up"
+    xhttp_vless_public_host: str = ""
+    xhttp_vless_public_port: int = 8444
+    xhttp_vless_security: str = "tls"
+    xhttp_vless_type: str = "xhttp"
+    xhttp_vless_sni: str = "s2.nnqnn.tech"
+    xhttp_vless_fp: str = "chrome"
+    xhttp_vless_path: str = "/kvpn-xhttp"
+    xhttp_vless_xhttp_mode: str = "packet-up"
+    hysteria2_public_host: str = ""
+    hysteria2_public_port: int = 443
+    hysteria2_sni: str = "s2.nnqnn.tech"
+    hysteria2_fp: str = "chrome"
+    hysteria2_udp_idle_timeout: int = 60
     legacy_vless_public_host: str = ""
     legacy_vless_public_port: int = 8443
     legacy_vless_security: str = "reality"
@@ -180,6 +204,37 @@ def build_xray_json_subscription_response(
     return SubscriptionResponse(body=body, headers=headers, nodes=_profile_remarks(configs))
 
 
+def build_debug_xray_json_subscription_response(
+    *,
+    snapshot: dict[str, Any],
+    product: str,
+    token: str,
+    profile: SubscriptionProfile,
+) -> SubscriptionResponse | None:
+    if product != profile.product:
+        return None
+
+    raw_user = snapshot.get("users", {}).get(token)
+    if not isinstance(raw_user, dict):
+        return None
+
+    user = snapshot_user_from_payload(raw_user)
+    config = build_debug_direct_tcp_profile(user, profile)
+    headers = {
+        "content-type": "application/json; charset=utf-8",
+        "cache-control": "no-store",
+        "content-disposition": f"attachment; filename={profile.product}_{user.telegram_id}_debug.json",
+        "support-url": profile.support_url,
+        "profile-title": f"base64:{b64_text('kVPN DEBUG DIRECT TCP ONLY')}",
+        "profile-update-interval": "1",
+        "subscription-auto-update-enable": "0",
+        "announce-url": profile.announce_url,
+        "profile-web-page-url": profile.announce_url,
+    }
+    body = json.dumps([config], ensure_ascii=False, separators=(",", ":"))
+    return SubscriptionResponse(body=body, headers=headers, nodes=[str(config["remarks"])])
+
+
 def build_xray_json_profiles(
     user: SnapshotUser,
     profile: SubscriptionProfile,
@@ -188,7 +243,7 @@ def build_xray_json_profiles(
 ) -> list[dict[str, Any]]:
     configs: list[dict[str, Any]] = []
     if user.main_vpn_active:
-        configs.append(_build_single_main_config(user, profile, bridge_profile=whitelist_profile))
+        configs.extend(_build_main_profile_configs(user, profile, bridge_profile=whitelist_profile))
     if user.whitelist_enabled and isinstance(whitelist_profile, dict):
         configs.append(_normalize_whitelist_profile(whitelist_profile, profile))
     return configs
@@ -303,6 +358,91 @@ def build_legacy_xray_outbound(
     )
 
 
+def build_noflow_xray_outbound(
+    user: SnapshotUser,
+    profile: SubscriptionProfile,
+    *,
+    tag: str = "proxy",
+) -> dict[str, Any] | None:
+    if not profile.noflow_vless_public_host:
+        return None
+    if profile.noflow_vless_security == "reality" and not profile.noflow_vless_pbk:
+        return None
+    return _build_vless_xray_outbound(
+        user=user,
+        tag=tag,
+        host=profile.noflow_vless_public_host,
+        port=profile.noflow_vless_public_port,
+        security=profile.noflow_vless_security,
+        transport=profile.noflow_vless_type,
+        sni=profile.noflow_vless_sni,
+        flow="",
+        fp=profile.noflow_vless_fp,
+        pbk=profile.noflow_vless_pbk,
+        sid=profile.noflow_vless_sid,
+        path=profile.noflow_vless_path,
+        xhttp_mode=profile.noflow_vless_xhttp_mode,
+    )
+
+
+def build_xhttp_xray_outbound(
+    user: SnapshotUser,
+    profile: SubscriptionProfile,
+    *,
+    tag: str = "proxy",
+) -> dict[str, Any] | None:
+    if not profile.xhttp_vless_public_host:
+        return None
+    return _build_vless_xray_outbound(
+        user=user,
+        tag=tag,
+        host=profile.xhttp_vless_public_host,
+        port=profile.xhttp_vless_public_port,
+        security=profile.xhttp_vless_security,
+        transport=profile.xhttp_vless_type,
+        sni=profile.xhttp_vless_sni,
+        flow="",
+        fp=profile.xhttp_vless_fp,
+        pbk="",
+        sid="",
+        path=profile.xhttp_vless_path,
+        xhttp_mode=profile.xhttp_vless_xhttp_mode,
+    )
+
+
+def build_hysteria2_xray_outbound(
+    user: SnapshotUser,
+    profile: SubscriptionProfile,
+    *,
+    tag: str = "proxy",
+) -> dict[str, Any] | None:
+    if not profile.hysteria2_public_host:
+        return None
+    host = profile.hysteria2_public_host
+    return {
+        "tag": tag,
+        "protocol": "hysteria",
+        "settings": {
+            "version": 2,
+            "address": host,
+            "port": profile.hysteria2_public_port,
+        },
+        "streamSettings": {
+            "network": "hysteria",
+            "security": "tls",
+            "tlsSettings": {
+                "serverName": profile.hysteria2_sni or host,
+                "fingerprint": profile.hysteria2_fp or "chrome",
+            },
+            "hysteriaSettings": {
+                "version": 2,
+                "auth": user.uuid,
+                "udpIdleTimeout": profile.hysteria2_udp_idle_timeout,
+            },
+        },
+    }
+
+
 def _build_chained_main_outbound(
     user: SnapshotUser,
     profile: SubscriptionProfile,
@@ -318,6 +458,50 @@ def _build_chained_main_outbound(
         "transportLayer": True,
     }
     return outbound
+
+
+def _build_main_profile_configs(
+    user: SnapshotUser,
+    profile: SubscriptionProfile,
+    *,
+    bridge_profile: dict[str, Any] | None = None,
+) -> list[dict[str, Any]]:
+    configs = [_build_single_main_config(user, profile, bridge_profile=bridge_profile)]
+
+    noflow_outbound = build_noflow_xray_outbound(user, profile)
+    if noflow_outbound is not None:
+        configs.append(
+            _build_single_outbound_main_config(
+                profile,
+                remarks=f"{profile.profile_title} - Основной VPN Reality no-flow",
+                outbound=noflow_outbound,
+                server_host=profile.noflow_vless_public_host,
+            )
+        )
+
+    xhttp_outbound = build_xhttp_xray_outbound(user, profile)
+    if xhttp_outbound is not None:
+        configs.append(
+            _build_single_outbound_main_config(
+                profile,
+                remarks=f"{profile.profile_title} - Основной VPN XHTTP",
+                outbound=xhttp_outbound,
+                server_host=profile.xhttp_vless_public_host,
+            )
+        )
+
+    hysteria2_outbound = build_hysteria2_xray_outbound(user, profile)
+    if hysteria2_outbound is not None:
+        configs.append(
+            _build_single_outbound_main_config(
+                profile,
+                remarks=f"{profile.profile_title} - Основной VPN Hysteria2",
+                outbound=hysteria2_outbound,
+                server_host=profile.hysteria2_public_host,
+            )
+        )
+
+    return configs
 
 
 def _build_bridge_outbounds(bridge_profile: dict[str, Any] | None, *, max_nodes: int) -> list[dict[str, Any]]:
@@ -420,14 +604,51 @@ def _build_vless_xray_outbound(
     }
 
 
+def _build_single_outbound_main_config(
+    profile: SubscriptionProfile,
+    *,
+    remarks: str,
+    outbound: dict[str, Any],
+    server_host: str,
+) -> dict[str, Any]:
+    config = _build_base_client_config(profile)
+    config["remarks"] = remarks
+    config["outbounds"] = [
+        outbound,
+        {
+            "tag": "direct",
+            "protocol": "freedom",
+            "settings": {"domainStrategy": "UseIPv4"},
+        },
+        {"tag": "block", "protocol": "blackhole"},
+    ]
+    direct_hosts = [host for host in {profile.vless_public_host, server_host} if host]
+    direct_ip_rules = [host for host in direct_hosts if _is_ip_address(host)]
+    direct_ip_rules.append("geoip:private")
+    direct_domain_rules = [f"domain:{host}" for host in direct_hosts if not _is_ip_address(host)]
+    rules: list[dict[str, Any]] = [{"ip": direct_ip_rules, "outboundTag": "direct"}]
+    if direct_domain_rules:
+        rules.append({"domain": direct_domain_rules, "outboundTag": "direct"})
+    rules.extend(
+        [
+            {"network": "udp", "port": "443", "outboundTag": "block"},
+            {"protocol": ["bittorrent"], "outboundTag": "block"},
+            {"network": "tcp,udp", "outboundTag": "proxy"},
+        ]
+    )
+    config["routing"] = {
+        "domainMatcher": "hybrid",
+        "domainStrategy": "AsIs",
+        "rules": rules,
+    }
+    return config
+
+
 def _build_base_client_config(profile: SubscriptionProfile) -> dict[str, Any]:
     return {
         "log": {"loglevel": "warning"},
         "dns": {
-            "servers": [
-                "https://dns.google/dns-query",
-                "https://cloudflare-dns.com/dns-query",
-            ],
+            "servers": ["1.1.1.1", "8.8.8.8", "localhost"],
             "queryStrategy": "UseIPv4",
         },
         "inbounds": [
@@ -524,8 +745,8 @@ def _build_single_main_config(
         "domainMatcher": "hybrid",
         "domainStrategy": "AsIs",
         "rules": [
-            {"ip": ["geoip:private"], "outboundTag": "direct"},
-            {"domain": ["geosite:category-ads-all"], "outboundTag": "block"},
+            {"ip": [profile.vless_public_host, "geoip:private"], "outboundTag": "direct"},
+            {"network": "udp", "port": "443", "outboundTag": "block"},
             {"protocol": ["bittorrent"], "outboundTag": "block"},
             final_rule,
         ],
@@ -550,6 +771,46 @@ def _build_blocked_config(profile: SubscriptionProfile) -> dict[str, Any]:
         ],
     }
     return config
+
+
+def build_debug_direct_tcp_profile(user: SnapshotUser, profile: SubscriptionProfile) -> dict[str, Any]:
+    outbound = build_main_xray_outbound(user, profile, tag="proxy")
+    stream_settings = outbound.setdefault("streamSettings", {})
+    if stream_settings.get("network") == "tcp":
+        stream_settings["tcpSettings"] = {"acceptProxyProtocol": False}
+    stream_settings["sockopt"] = {
+        "tcpNoDelay": True,
+        "tcpKeepAliveIdle": 60,
+        "tcpKeepAliveInterval": 30,
+    }
+    return {
+        "log": {"loglevel": "debug"},
+        "dns": {
+            "servers": ["1.1.1.1", "8.8.8.8", "localhost"],
+            "queryStrategy": "UseIPv4",
+        },
+        "remarks": "kVPN DEBUG DIRECT TCP ONLY",
+        "outbounds": [
+            outbound,
+            {
+                "tag": "direct",
+                "protocol": "freedom",
+                "settings": {"domainStrategy": "UseIPv4"},
+            },
+            {"tag": "block", "protocol": "blackhole"},
+        ],
+        "routing": {
+            "domainMatcher": "hybrid",
+            "domainStrategy": "AsIs",
+            "rules": [
+                {"ip": [profile.vless_public_host, "geoip:private"], "outboundTag": "direct"},
+                {"network": "udp", "port": "443", "outboundTag": "block"},
+                {"protocol": ["bittorrent"], "outboundTag": "block"},
+                {"network": "tcp", "outboundTag": "proxy"},
+                {"network": "udp", "outboundTag": "proxy"},
+            ],
+        },
+    }
 
 
 def _normalize_whitelist_profile(whitelist_profile: dict[str, Any], profile: SubscriptionProfile) -> dict[str, Any]:
@@ -707,3 +968,11 @@ def _looks_like_russian_node(link: str) -> bool:
     except ValueError:
         return False
     return decoded_name.startswith("ru") or decoded_name.startswith("russia")
+
+
+def _is_ip_address(value: str) -> bool:
+    try:
+        ip_address(value)
+    except ValueError:
+        return False
+    return True

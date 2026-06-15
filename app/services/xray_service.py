@@ -371,9 +371,15 @@ class XrayService:
         inbound_tag = inbound_tag or self.settings.xray_inbound_tag
         inbound = copy.deepcopy(self._find_inbound(config, inbound_tag=inbound_tag))
         inbound.setdefault("settings", {})
-        inbound["settings"]["clients"] = [
-            self._build_client(user_uuid=user_uuid, email=email, flow=self._flow_for_inbound_tag(inbound_tag))
-        ]
+        if self._is_hysteria_inbound(inbound):
+            inbound["settings"]["users"] = [self._build_hysteria_user(user_uuid=user_uuid, email=email)]
+            inbound["settings"].pop("clients", None)
+            inbound["settings"].setdefault("version", 2)
+        else:
+            inbound["settings"]["clients"] = [
+                self._build_client(user_uuid=user_uuid, email=email, flow=self._flow_for_inbound_tag(inbound_tag))
+            ]
+            inbound["settings"].setdefault("decryption", "none")
         return {"inbounds": [inbound]}
 
     async def _remove_user_via_api(self, email: str) -> None:
@@ -406,6 +412,14 @@ class XrayService:
         if client_flow:
             data["flow"] = client_flow
         return data
+
+    @staticmethod
+    def _build_hysteria_user(user_uuid: str, email: str) -> dict[str, Any]:
+        return {"auth": str(user_uuid), "email": email, "level": 0}
+
+    @staticmethod
+    def _is_hysteria_inbound(inbound: dict[str, Any]) -> bool:
+        return inbound.get("protocol") == "hysteria"
 
     def _read_config(self) -> dict[str, Any]:
         config_path = self.settings.xray_config_path
@@ -516,15 +530,21 @@ class XrayService:
     ) -> bool:
         inbound_tag = inbound_tag or self.settings.xray_inbound_tag
         inbound = self._find_inbound(config, inbound_tag=inbound_tag)
-        clients: list[dict[str, Any]] = inbound.setdefault("settings", {}).setdefault("clients", [])
-        next_client = self._build_client(user_uuid=user_uuid, email=email, flow=self._flow_for_inbound_tag(inbound_tag))
-        for index, client in enumerate(clients):
-            if client.get("email") == email:
-                if client == next_client:
+        settings = inbound.setdefault("settings", {})
+        key = "users" if self._is_hysteria_inbound(inbound) else "clients"
+        users: list[dict[str, Any]] = settings.setdefault(key, [])
+        next_user = (
+            self._build_hysteria_user(user_uuid=user_uuid, email=email)
+            if self._is_hysteria_inbound(inbound)
+            else self._build_client(user_uuid=user_uuid, email=email, flow=self._flow_for_inbound_tag(inbound_tag))
+        )
+        for index, user in enumerate(users):
+            if user.get("email") == email:
+                if user == next_user:
                     return False
-                clients[index] = next_client
+                users[index] = next_user
                 return True
-        clients.append(next_client)
+        users.append(next_user)
         return True
 
     def _remove_managed_client_from_config(
@@ -535,11 +555,13 @@ class XrayService:
         inbound_tag: str | None = None,
     ) -> bool:
         inbound = self._find_inbound(config, inbound_tag=inbound_tag)
-        clients: list[dict[str, Any]] = inbound.setdefault("settings", {}).setdefault("clients", [])
-        updated = [client for client in clients if client.get("email") != email]
-        if len(updated) == len(clients):
+        settings = inbound.setdefault("settings", {})
+        key = "users" if self._is_hysteria_inbound(inbound) else "clients"
+        users: list[dict[str, Any]] = settings.setdefault(key, [])
+        updated = [user for user in users if user.get("email") != email]
+        if len(updated) == len(users):
             return False
-        inbound["settings"]["clients"] = updated
+        inbound["settings"][key] = updated
         return True
 
     def _sync_managed_clients_in_config(
@@ -550,24 +572,30 @@ class XrayService:
     ) -> bool:
         inbound_tag = inbound_tag or self.settings.xray_inbound_tag
         inbound = self._find_inbound(config, inbound_tag=inbound_tag)
-        clients: list[dict[str, Any]] = inbound.setdefault("settings", {}).setdefault("clients", [])
+        settings = inbound.setdefault("settings", {})
+        key = "users" if self._is_hysteria_inbound(inbound) else "clients"
+        users: list[dict[str, Any]] = settings.setdefault(key, [])
         non_managed_clients = [
-            client
-            for client in clients
-            if not self._is_managed_email(client.get("email") if isinstance(client, dict) else None)
+            user
+            for user in users
+            if not self._is_managed_email(user.get("email") if isinstance(user, dict) else None)
         ]
         expected_clients = [
-            self._build_client(
-                user_uuid=expected_by_email[email],
-                email=email,
-                flow=self._flow_for_inbound_tag(inbound_tag),
+            (
+                self._build_hysteria_user(user_uuid=expected_by_email[email], email=email)
+                if self._is_hysteria_inbound(inbound)
+                else self._build_client(
+                    user_uuid=expected_by_email[email],
+                    email=email,
+                    flow=self._flow_for_inbound_tag(inbound_tag),
+                )
             )
             for email in sorted(expected_by_email)
         ]
         updated = non_managed_clients + expected_clients
-        if clients == updated:
+        if users == updated:
             return False
-        inbound["settings"]["clients"] = updated
+        inbound["settings"][key] = updated
         return True
 
     @staticmethod

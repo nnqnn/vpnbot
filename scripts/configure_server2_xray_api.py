@@ -16,9 +16,13 @@ def main() -> None:
     parser.add_argument("--inbound-tag", default="upstream-in")
     parser.add_argument("--direct-port", type=int, default=9443)
     parser.add_argument("--public-reality-inbound-tag", default="direct-reality-8443")
-    parser.add_argument("--public-reality-port", type=int, default=8443)
+    parser.add_argument("--public-reality-port", type=int, default=443)
     parser.add_argument("--public-reality-server-name", action="append", default=None)
-    parser.add_argument("--public-reality-dest", default="yandex.ru:443")
+    parser.add_argument("--public-reality-dest", default="www.yandex.ru:443")
+    parser.add_argument("--noflow-reality-inbound-tag", default="direct-reality-noflow-8443")
+    parser.add_argument("--noflow-reality-port", type=int, default=8443)
+    parser.add_argument("--noflow-reality-server-name", action="append", default=None)
+    parser.add_argument("--noflow-reality-dest", default="www.yandex.ru:443")
     parser.add_argument("--cdn-ws-inbound-tag", default="cdn-ws-in")
     parser.add_argument("--cdn-ws-port", type=int, default=10086)
     parser.add_argument("--cdn-ws-path", default="/kvpn-ws")
@@ -26,7 +30,12 @@ def main() -> None:
     parser.add_argument("--xhttp-port", type=int, default=10087)
     parser.add_argument("--xhttp-path", default="/kvpn-xhttp")
     parser.add_argument("--xhttp-mode", default="packet-up")
-    parser.add_argument("--server-name", action="append", default=["www.cloudflare.com", "yandex.ru"])
+    parser.add_argument("--hysteria2-inbound-tag", default="hysteria2-udp-443")
+    parser.add_argument("--hysteria2-port", type=int, default=443)
+    parser.add_argument("--hysteria2-cert-file", default="/etc/letsencrypt/live/s2.nnqnn.tech/fullchain.pem")
+    parser.add_argument("--hysteria2-key-file", default="/etc/letsencrypt/live/s2.nnqnn.tech/privkey.pem")
+    parser.add_argument("--hysteria2-masquerade-url", default="https://www.yandex.ru/")
+    parser.add_argument("--server-name", action="append", default=["www.cloudflare.com", "www.yandex.ru", "yandex.ru"])
     parser.add_argument("--short-id", default="a1b2c3d4e5f6a7b8")
     parser.add_argument("--flow", default="xtls-rprx-vision")
     parser.add_argument("--private-key", default="")
@@ -43,6 +52,10 @@ def main() -> None:
         public_reality_port=args.public_reality_port,
         public_reality_server_names=args.public_reality_server_name,
         public_reality_dest=args.public_reality_dest,
+        noflow_reality_inbound_tag=args.noflow_reality_inbound_tag,
+        noflow_reality_port=args.noflow_reality_port,
+        noflow_reality_server_names=args.noflow_reality_server_name,
+        noflow_reality_dest=args.noflow_reality_dest,
         cdn_ws_inbound_tag=args.cdn_ws_inbound_tag,
         cdn_ws_port=args.cdn_ws_port,
         cdn_ws_path=args.cdn_ws_path,
@@ -50,6 +63,11 @@ def main() -> None:
         xhttp_port=args.xhttp_port,
         xhttp_path=args.xhttp_path,
         xhttp_mode=args.xhttp_mode,
+        hysteria2_inbound_tag=args.hysteria2_inbound_tag,
+        hysteria2_port=args.hysteria2_port,
+        hysteria2_cert_file=args.hysteria2_cert_file,
+        hysteria2_key_file=args.hysteria2_key_file,
+        hysteria2_masquerade_url=args.hysteria2_masquerade_url,
         server_names=args.server_name,
         short_id=args.short_id,
         flow=args.flow,
@@ -77,9 +95,13 @@ def ensure_xray_api(
     inbound_tag: str = "upstream-in",
     direct_port: int = 9443,
     public_reality_inbound_tag: str = "direct-reality-8443",
-    public_reality_port: int = 8443,
+    public_reality_port: int = 443,
     public_reality_server_names: list[str] | None = None,
-    public_reality_dest: str = "yandex.ru:443",
+    public_reality_dest: str = "www.yandex.ru:443",
+    noflow_reality_inbound_tag: str = "direct-reality-noflow-8443",
+    noflow_reality_port: int = 8443,
+    noflow_reality_server_names: list[str] | None = None,
+    noflow_reality_dest: str = "www.yandex.ru:443",
     cdn_ws_inbound_tag: str = "cdn-ws-in",
     cdn_ws_port: int = 10086,
     cdn_ws_path: str = "/kvpn-ws",
@@ -87,6 +109,11 @@ def ensure_xray_api(
     xhttp_port: int = 10087,
     xhttp_path: str = "/kvpn-xhttp",
     xhttp_mode: str = "packet-up",
+    hysteria2_inbound_tag: str = "hysteria2-udp-443",
+    hysteria2_port: int = 443,
+    hysteria2_cert_file: str = "/etc/letsencrypt/live/s2.nnqnn.tech/fullchain.pem",
+    hysteria2_key_file: str = "/etc/letsencrypt/live/s2.nnqnn.tech/privkey.pem",
+    hysteria2_masquerade_url: str = "https://www.yandex.ru/",
     server_names: list[str] | None = None,
     short_id: str = "a1b2c3d4e5f6a7b8",
     flow: str = "xtls-rprx-vision",
@@ -99,7 +126,7 @@ def ensure_xray_api(
         data,
         inbound_tag=inbound_tag,
         direct_port=direct_port,
-        server_names=server_names or ["www.cloudflare.com", "yandex.ru"],
+        server_names=server_names or ["www.cloudflare.com", "www.yandex.ru", "yandex.ru"],
         short_id=short_id,
         flow=flow,
         private_key=private_key,
@@ -108,11 +135,22 @@ def ensure_xray_api(
         data,
         inbound_tag=public_reality_inbound_tag,
         direct_port=public_reality_port,
-        server_names=public_reality_server_names or ["yandex.ru"],
+        server_names=public_reality_server_names or ["www.yandex.ru", "yandex.ru"],
         short_id=short_id,
         flow=flow,
         private_key=private_key,
         dest=public_reality_dest,
+        replace_server_names=True,
+    ) or changed
+    changed = ensure_direct_vless_reality_inbound(
+        data,
+        inbound_tag=noflow_reality_inbound_tag,
+        direct_port=noflow_reality_port,
+        server_names=noflow_reality_server_names or ["www.yandex.ru", "yandex.ru"],
+        short_id=short_id,
+        flow="",
+        private_key=private_key,
+        dest=noflow_reality_dest,
         replace_server_names=True,
     ) or changed
     changed = ensure_cdn_vless_ws_inbound(
@@ -129,6 +167,14 @@ def ensure_xray_api(
         port=xhttp_port,
         path=xhttp_path,
         mode=xhttp_mode,
+    ) or changed
+    changed = ensure_hysteria2_inbound(
+        data,
+        inbound_tag=hysteria2_inbound_tag,
+        port=hysteria2_port,
+        cert_file=hysteria2_cert_file,
+        key_file=hysteria2_key_file,
+        masquerade_url=hysteria2_masquerade_url,
     ) or changed
 
     api = data.setdefault("api", {})
@@ -162,7 +208,16 @@ def ensure_xray_api(
     if not any(rule.get("inboundTag") == ["api"] and rule.get("outboundTag") == "api" for rule in rules):
         rules.insert(0, api_rule)
         changed = True
-    vpn_inbound_tags = sorted({inbound_tag, public_reality_inbound_tag, cdn_ws_inbound_tag, xhttp_inbound_tag})
+    vpn_inbound_tags = sorted(
+        {
+            inbound_tag,
+            public_reality_inbound_tag,
+            noflow_reality_inbound_tag,
+            cdn_ws_inbound_tag,
+            xhttp_inbound_tag,
+            hysteria2_inbound_tag,
+        }
+    )
     vpn_direct_rule = {
         "type": "field",
         "inboundTag": vpn_inbound_tags,
@@ -382,6 +437,78 @@ def ensure_vless_xhttp_inbound(
             if isinstance(client, dict) and "flow" in client:
                 client.pop("flow", None)
                 changed = True
+
+    stream = inbound.setdefault("streamSettings", {})
+    expected_stream = expected["streamSettings"]
+    if _merge_dict(stream, expected_stream):
+        changed = True
+    return changed
+
+
+def ensure_hysteria2_inbound(
+    data: dict[str, Any],
+    *,
+    inbound_tag: str,
+    port: int,
+    cert_file: str,
+    key_file: str,
+    masquerade_url: str,
+) -> bool:
+    changed = False
+    inbounds = data.setdefault("inbounds", [])
+    inbound = _find_by_tag(inbounds, inbound_tag)
+    expected = {
+        "tag": inbound_tag,
+        "listen": "0.0.0.0",
+        "port": port,
+        "protocol": "hysteria",
+        "settings": {
+            "version": 2,
+            "users": [],
+        },
+        "streamSettings": {
+            "network": "hysteria",
+            "security": "tls",
+            "tlsSettings": {
+                "certificates": [
+                    {
+                        "certificateFile": cert_file,
+                        "keyFile": key_file,
+                    }
+                ]
+            },
+            "hysteriaSettings": {
+                "version": 2,
+                "udpIdleTimeout": 60,
+                "masquerade": {
+                    "type": "proxy",
+                    "url": masquerade_url,
+                    "rewriteHost": True,
+                },
+            },
+        },
+    }
+
+    if inbound is None:
+        inbounds.append(expected)
+        return True
+
+    for key in ("tag", "listen", "port", "protocol"):
+        if inbound.get(key) != expected[key]:
+            inbound[key] = expected[key]
+            changed = True
+
+    settings = inbound.setdefault("settings", {})
+    if settings.get("version") != 2:
+        settings["version"] = 2
+        changed = True
+    users = settings.setdefault("users", [])
+    if not isinstance(users, list):
+        settings["users"] = []
+        changed = True
+    if "clients" in settings:
+        settings.pop("clients", None)
+        changed = True
 
     stream = inbound.setdefault("streamSettings", {})
     expected_stream = expected["streamSettings"]

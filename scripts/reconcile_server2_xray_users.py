@@ -184,6 +184,24 @@ def build_client(user_uuid: str, email: str, flow: str) -> dict[str, Any]:
     return client
 
 
+def build_hysteria_user(user_uuid: str, email: str) -> dict[str, Any]:
+    return {"auth": str(user_uuid), "email": email, "level": 0}
+
+
+def is_hysteria_inbound(inbound: dict[str, Any]) -> bool:
+    return inbound.get("protocol") == "hysteria"
+
+
+def user_list_key(inbound: dict[str, Any]) -> str:
+    return "users" if is_hysteria_inbound(inbound) else "clients"
+
+
+def build_inbound_user(inbound: dict[str, Any], user_uuid: str, email: str, flow: str) -> dict[str, Any]:
+    if is_hysteria_inbound(inbound):
+        return build_hysteria_user(user_uuid, email)
+    return build_client(user_uuid, email, flow)
+
+
 def is_managed_email(email: str | None) -> bool:
     return bool(email and email.startswith(MANAGED_PREFIX) and email.endswith(MANAGED_SUFFIX))
 
@@ -197,44 +215,50 @@ def sync_managed_clients_in_config(
 ) -> bool:
     inbound = find_inbound(config, inbound_tag)
     settings = inbound.setdefault("settings", {})
-    clients = settings.setdefault("clients", [])
-    if not isinstance(clients, list):
-        settings["clients"] = []
-        clients = settings["clients"]
+    key = user_list_key(inbound)
+    users = settings.setdefault(key, [])
+    if not isinstance(users, list):
+        settings[key] = []
+        users = settings[key]
 
     non_managed = [
-        client
-        for client in clients
-        if not (isinstance(client, dict) and is_managed_email(client.get("email")))
+        user
+        for user in users
+        if not (isinstance(user, dict) and is_managed_email(user.get("email")))
     ]
-    expected_clients = [build_client(expected[email], email, flow) for email in sorted(expected)]
-    updated = non_managed + expected_clients
-    if clients == updated:
+    expected_users = [build_inbound_user(inbound, expected[email], email, flow) for email in sorted(expected)]
+    updated = non_managed + expected_users
+    if users == updated:
         return False
-    settings["clients"] = updated
-    settings.setdefault("decryption", "none")
+    settings[key] = updated
+    if not is_hysteria_inbound(inbound):
+        settings.setdefault("decryption", "none")
     return True
 
 
 def strip_managed_clients_from_config(config: dict[str, Any], *, inbound_tag: str) -> bool:
     inbound = find_inbound(config, inbound_tag)
     settings = inbound.setdefault("settings", {})
-    clients = settings.setdefault("clients", [])
-    if not isinstance(clients, list):
-        settings["clients"] = []
-        settings.setdefault("decryption", "none")
+    key = user_list_key(inbound)
+    users = settings.setdefault(key, [])
+    if not isinstance(users, list):
+        settings[key] = []
+        if not is_hysteria_inbound(inbound):
+            settings.setdefault("decryption", "none")
         return True
 
     updated = [
-        client
-        for client in clients
-        if not (isinstance(client, dict) and is_managed_email(client.get("email")))
+        user
+        for user in users
+        if not (isinstance(user, dict) and is_managed_email(user.get("email")))
     ]
-    if clients == updated:
-        settings.setdefault("decryption", "none")
+    if users == updated:
+        if not is_hysteria_inbound(inbound):
+            settings.setdefault("decryption", "none")
         return False
-    settings["clients"] = updated
-    settings.setdefault("decryption", "none")
+    settings[key] = updated
+    if not is_hysteria_inbound(inbound):
+        settings.setdefault("decryption", "none")
     return True
 
 
@@ -352,8 +376,13 @@ def build_adu_payload(
 ) -> dict[str, Any]:
     inbound = json.loads(json.dumps(find_inbound(config, inbound_tag), ensure_ascii=False))
     inbound.setdefault("settings", {})
-    inbound["settings"]["clients"] = [build_client(user_uuid, email, flow)]
-    inbound["settings"].setdefault("decryption", "none")
+    key = user_list_key(inbound)
+    inbound["settings"][key] = [build_inbound_user(inbound, user_uuid, email, flow)]
+    if is_hysteria_inbound(inbound):
+        inbound["settings"].pop("clients", None)
+        inbound["settings"].setdefault("version", 2)
+    else:
+        inbound["settings"].setdefault("decryption", "none")
     return {"inbounds": [inbound]}
 
 

@@ -190,15 +190,24 @@ ensure_csv_env_contains() {
 
 upsert_env_value XRAY_INBOUND_TAG direct-reality-8443
 ensure_csv_env_contains XRAY_EXTRA_INBOUND_TAGS upstream-in cdn-ws-in xhttp-in
+ensure_csv_env_contains XRAY_EXTRA_INBOUND_TAGS direct-reality-noflow-8443 hysteria2-udp-443
 upsert_env_value XRAY_FLOW_INBOUND_TAGS direct-reality-8443,upstream-in
 upsert_env_value VLESS_PUBLIC_HOST 89.125.50.96
 upsert_env_value VLESS_PUBLIC_PORT 443
 upsert_env_value VLESS_SECURITY reality
 upsert_env_value VLESS_TYPE tcp
-upsert_env_value VLESS_SNI yandex.ru
+upsert_env_value VLESS_SNI www.yandex.ru
 upsert_env_value VLESS_FLOW xtls-rprx-vision
 upsert_env_value VLESS_PATH ""
 upsert_env_value VLESS_XHTTP_MODE packet-up
+upsert_env_value SUBSCRIPTION_PUBLIC_BASE_URL https://s2.nnqnn.tech:8444
+upsert_env_value SUBSCRIPTION_NGINX_HTTPS_PUBLIC_PORT 8444
+upsert_env_value SUBSCRIPTION_PUBLIC_REALITY_PORT 443
+upsert_env_value SUBSCRIPTION_PUBLIC_VLESS_PORT 443
+upsert_env_value SUBSCRIPTION_NOFLOW_REALITY_INBOUND_TAG direct-reality-noflow-8443
+upsert_env_value SUBSCRIPTION_NOFLOW_REALITY_PORT 8443
+upsert_env_value SUBSCRIPTION_HYSTERIA2_INBOUND_TAG hysteria2-udp-443
+upsert_env_value SUBSCRIPTION_HYSTERIA2_PORT 443
 
 if ! systemctl is-active --quiet xray; then
   echo "xray.service is not active. Refusing to deploy bot changes." >&2
@@ -338,7 +347,7 @@ if [[ -z "$token" ]]; then
   exit 1
 fi
 subscription_body="$(mktemp)"
-if ! curl -fsS "https://s2.nnqnn.tech/sub/kVPN/${token}?format=raw" -o "$subscription_body"; then
+if ! curl -fsS "https://s2.nnqnn.tech:8444/sub/kVPN/${token}?format=raw" -o "$subscription_body"; then
   rm -f "$subscription_body"
   rollback "Failed to fetch raw subscription for verification."
   exit 1
@@ -373,10 +382,19 @@ if stream.get("network") != "tcp":
     raise SystemExit(f"unexpected network: {stream.get('network')}")
 if stream.get("security") != "reality":
     raise SystemExit(f"unexpected security: {stream.get('security')}")
-if reality.get("serverName") != "yandex.ru":
+if reality.get("serverName") != "www.yandex.ru":
     raise SystemExit(f"unexpected serverName: {reality.get('serverName')}")
 if not users or users[0].get("flow") != "xtls-rprx-vision":
     raise SystemExit("main user flow is not xtls-rprx-vision")
+remarks = {str(item.get("remarks")) for item in configs if isinstance(item, dict)}
+required_suffixes = {
+    "Основной VPN Reality no-flow",
+    "Основной VPN XHTTP",
+    "Основной VPN Hysteria2",
+}
+for suffix in required_suffixes:
+    if not any(remark.endswith(suffix) for remark in remarks):
+        raise SystemExit(f"missing subscription profile: {suffix}")
 PY
 then
   rm -f "$subscription_body"

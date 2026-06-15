@@ -14,11 +14,14 @@ from app.main import _run_timed_startup_step
 from app.subscription_server import (
     SubscriptionHandler,
     _is_browser_navigation,
+    _is_links_subscription_request,
     _is_raw_subscription_request,
+    _links_subscription_url,
     _raw_subscription_url,
 )
 from app.services.subscription_builder import (
     SubscriptionProfile,
+    build_debug_xray_json_subscription_response,
     build_happ_link,
     build_happ_redirect_url,
     build_subscription_response,
@@ -29,6 +32,7 @@ from app.services.subscription_sync_service import build_snapshot_payload
 from app.services.xray_service import XrayService
 from scripts.configure_server2_xray_api import ensure_xray_api
 from scripts.reconcile_server2_xray_users import (
+    build_adu_payload,
     runtime_matches,
     strip_managed_clients_from_config,
     sync_managed_clients_in_config,
@@ -50,7 +54,7 @@ def _profile() -> SubscriptionProfile:
         vless_public_port=443,
         vless_security="reality",
         vless_type="tcp",
-        vless_sni="yandex.ru",
+        vless_sni="www.yandex.ru",
         vless_flow="xtls-rprx-vision",
         vless_fp="chrome",
         vless_pbk="PUBLIC_KEY",
@@ -230,7 +234,7 @@ def test_xray_json_response_separates_main_and_whitelist_profiles_for_full_acces
     assert main_config["remarks"] == "kVPN @kkVPNrobot - Основной VPN"
     assert main_config["outbounds"][0]["tag"] == "proxy"
     assert main_config["outbounds"][0]["settings"]["vnext"][0]["address"] == "89.125.50.96"
-    assert main_config["outbounds"][0]["streamSettings"]["realitySettings"]["serverName"] == "yandex.ru"
+    assert main_config["outbounds"][0]["streamSettings"]["realitySettings"]["serverName"] == "www.yandex.ru"
     assert whitelist_config["remarks"] == "kVPN @kkVPNrobot - Обход белых списков"
     assert whitelist_config["outbounds"][0]["tag"] == "auto-001"
     assert whitelist_config["routing"]["balancers"][0]["selector"] == ["auto-"]
@@ -264,15 +268,55 @@ def test_xray_json_response_builds_main_only_profile_without_whitelist_fetch() -
     assert len(configs) == 1
     config = configs[0]
     assert [outbound["tag"] for outbound in config["outbounds"]] == ["proxy", "direct", "block"]
-    assert config["dns"] == {
-        "servers": [
-            "https://dns.google/dns-query",
-            "https://cloudflare-dns.com/dns-query",
-        ],
-        "queryStrategy": "UseIPv4",
-    }
+    assert config["dns"] == {"servers": ["1.1.1.1", "8.8.8.8", "localhost"], "queryStrategy": "UseIPv4"}
     assert config["routing"]["domainStrategy"] == "AsIs"
+    assert config["routing"]["rules"][0] == {"ip": ["89.125.50.96", "geoip:private"], "outboundTag": "direct"}
+    assert config["routing"]["rules"][1] == {"network": "udp", "port": "443", "outboundTag": "block"}
     assert config["routing"]["rules"][-1] == {"network": "tcp,udp", "outboundTag": "proxy"}
+
+
+def test_debug_xray_json_response_builds_tcp_only_profile() -> None:
+    snapshot = {
+        "users": {
+            "tok": {
+                "telegram_id": 123,
+                "uuid": "00000000-0000-0000-0000-000000000001",
+                "main_vpn_active": True,
+                "whitelist_enabled": True,
+                "expire": 1781259930,
+            }
+        }
+    }
+
+    response = build_debug_xray_json_subscription_response(snapshot=snapshot, product="kVPN", token="tok", profile=_profile())
+
+    assert response is not None
+    configs = json.loads(response.body)
+    assert len(configs) == 1
+    config = configs[0]
+    assert config["remarks"] == "kVPN DEBUG DIRECT TCP ONLY"
+    assert "inbounds" not in config
+    assert config["dns"] == {"servers": ["1.1.1.1", "8.8.8.8", "localhost"], "queryStrategy": "UseIPv4"}
+    assert [outbound["tag"] for outbound in config["outbounds"]] == ["proxy", "direct", "block"]
+    outbound = config["outbounds"][0]
+    assert outbound["settings"]["vnext"][0]["address"] == "89.125.50.96"
+    assert outbound["settings"]["vnext"][0]["port"] == 443
+    assert outbound["settings"]["vnext"][0]["users"][0]["flow"] == "xtls-rprx-vision"
+    assert outbound["streamSettings"]["network"] == "tcp"
+    assert outbound["streamSettings"]["security"] == "reality"
+    assert outbound["streamSettings"]["tcpSettings"] == {"acceptProxyProtocol": False}
+    assert outbound["streamSettings"]["sockopt"] == {
+        "tcpNoDelay": True,
+        "tcpKeepAliveIdle": 60,
+        "tcpKeepAliveInterval": 30,
+    }
+    assert config["routing"]["rules"] == [
+        {"ip": ["89.125.50.96", "geoip:private"], "outboundTag": "direct"},
+        {"network": "udp", "port": "443", "outboundTag": "block"},
+        {"protocol": ["bittorrent"], "outboundTag": "block"},
+        {"network": "tcp", "outboundTag": "proxy"},
+        {"network": "udp", "outboundTag": "proxy"},
+    ]
 
 
 def test_xray_json_response_supports_vless_ws_tls_profile() -> None:
@@ -380,6 +424,74 @@ def test_xray_json_main_profile_can_include_direct_reality_fallback() -> None:
     assert config["routing"]["rules"][-1] == {"network": "tcp,udp", "balancerTag": "proxy-auto"}
     assert config["routing"]["balancers"][0]["selector"] == ["proxy-cdn", "proxy-direct"]
     assert config["observatory"]["subjectSelector"] == ["proxy-cdn", "proxy-direct"]
+
+
+def test_xray_json_response_adds_separate_main_fallback_profiles_with_whitelist() -> None:
+    snapshot = {
+        "users": {
+            "tok": {
+                "telegram_id": 123,
+                "uuid": "00000000-0000-0000-0000-000000000001",
+                "main_vpn_active": True,
+                "whitelist_enabled": True,
+                "expire": 1781259930,
+            }
+        }
+    }
+    profile = replace(
+        _profile(),
+        noflow_vless_public_host="89.125.50.96",
+        noflow_vless_public_port=8443,
+        noflow_vless_pbk="PUBLIC_KEY",
+        xhttp_vless_public_host="s2.nnqnn.tech",
+        xhttp_vless_public_port=8444,
+        xhttp_vless_sni="s2.nnqnn.tech",
+        xhttp_vless_path="/kvpn-xhttp",
+        hysteria2_public_host="89.125.50.96",
+        hysteria2_public_port=443,
+        hysteria2_sni="s2.nnqnn.tech",
+    )
+    worker_profile = {
+        "outbounds": [
+            {"tag": "auto-001", "protocol": "vless"},
+            {"tag": "direct", "protocol": "freedom"},
+            {"tag": "block", "protocol": "blackhole"},
+        ],
+        "routing": {"balancers": [{"tag": "auto", "selector": ["auto-"]}]},
+    }
+
+    response = build_xray_json_subscription_response(
+        snapshot=snapshot,
+        product="kVPN",
+        token="tok",
+        profile=profile,
+        whitelist_profile=worker_profile,
+    )
+
+    assert response is not None
+    configs = json.loads(response.body)
+    assert [config["remarks"] for config in configs] == [
+        "kVPN @kkVPNrobot - Основной VPN",
+        "kVPN @kkVPNrobot - Основной VPN Reality no-flow",
+        "kVPN @kkVPNrobot - Основной VPN XHTTP",
+        "kVPN @kkVPNrobot - Основной VPN Hysteria2",
+        "kVPN @kkVPNrobot - Обход белых списков",
+    ]
+    noflow = configs[1]["outbounds"][0]
+    assert noflow["settings"]["vnext"][0]["port"] == 8443
+    assert "flow" not in noflow["settings"]["vnext"][0]["users"][0]
+    assert noflow["streamSettings"]["security"] == "reality"
+    xhttp = configs[2]["outbounds"][0]
+    assert xhttp["settings"]["vnext"][0]["address"] == "s2.nnqnn.tech"
+    assert xhttp["settings"]["vnext"][0]["port"] == 8444
+    assert xhttp["streamSettings"]["network"] == "xhttp"
+    assert xhttp["streamSettings"]["security"] == "tls"
+    hysteria = configs[3]["outbounds"][0]
+    assert hysteria["protocol"] == "hysteria"
+    assert hysteria["settings"] == {"version": 2, "address": "89.125.50.96", "port": 443}
+    assert hysteria["streamSettings"]["network"] == "hysteria"
+    assert hysteria["streamSettings"]["hysteriaSettings"]["auth"] == "00000000-0000-0000-0000-000000000001"
+    assert configs[4]["outbounds"][0]["tag"] == "auto-001"
 
 
 def test_xray_json_main_profile_can_use_xhttp_tls_as_primary() -> None:
@@ -624,6 +736,9 @@ def test_subscription_links() -> None:
     assert _raw_subscription_url("https://vpn.nnqnn.tech/", "kVPN", "abc") == (
         "https://vpn.nnqnn.tech/sub/kVPN/abc?format=raw"
     )
+    assert _links_subscription_url("https://vpn.nnqnn.tech/", "kVPN", "abc") == (
+        "https://vpn.nnqnn.tech/sub/kVPN/abc?format=links"
+    )
 
 
 def test_subscription_server_browser_redirect_detection() -> None:
@@ -632,6 +747,9 @@ def test_subscription_server_browser_redirect_detection() -> None:
     assert _is_raw_subscription_request({"format": ["raw"]})
     assert _is_raw_subscription_request({"raw": ["1"]})
     assert not _is_raw_subscription_request({})
+    assert _is_links_subscription_request({"format": ["links"]})
+    assert _is_links_subscription_request({"links": ["1"]})
+    assert not _is_links_subscription_request({})
 
 
 def test_bot_vpn_access_text_contains_happ_and_https_links() -> None:
@@ -715,7 +833,7 @@ def test_xray_service_uses_flow_only_for_reality_inbound_tags() -> None:
     service = XrayService(
         SimpleNamespace(
             xray_inbound_tag="direct-reality-8443",
-            xray_extra_inbound_tags="upstream-in,cdn-ws-in,xhttp-in",
+            xray_extra_inbound_tags="upstream-in,cdn-ws-in,xhttp-in,direct-reality-noflow-8443,hysteria2-udp-443",
             xray_flow_inbound_tags="direct-reality-8443,upstream-in",
             vless_flow="xtls-rprx-vision",
         )
@@ -726,11 +844,15 @@ def test_xray_service_uses_flow_only_for_reality_inbound_tags() -> None:
         "upstream-in",
         "cdn-ws-in",
         "xhttp-in",
+        "direct-reality-noflow-8443",
+        "hysteria2-udp-443",
     ]
     assert service._flow_for_inbound_tag("direct-reality-8443") == "xtls-rprx-vision"
     assert service._flow_for_inbound_tag("upstream-in") == "xtls-rprx-vision"
     assert service._flow_for_inbound_tag("cdn-ws-in") == ""
     assert service._flow_for_inbound_tag("xhttp-in") == ""
+    assert service._flow_for_inbound_tag("direct-reality-noflow-8443") == ""
+    assert service._flow_for_inbound_tag("hysteria2-udp-443") == ""
 
 
 def test_remote_xray_config_sync_preserves_old_chain_and_removes_stale_users() -> None:
@@ -813,12 +935,12 @@ def test_server2_xray_api_config_preserves_old_chain_client() -> None:
     assert "yandex.ru" in upstream["streamSettings"]["realitySettings"]["serverNames"]
     direct_reality = next(inbound for inbound in config["inbounds"] if inbound["tag"] == "direct-reality-8443")
     assert direct_reality["listen"] == "0.0.0.0"
-    assert direct_reality["port"] == 8443
+    assert direct_reality["port"] == 443
     assert direct_reality["streamSettings"]["network"] == "tcp"
     assert direct_reality["streamSettings"]["security"] == "reality"
     assert direct_reality["streamSettings"]["realitySettings"]["privateKey"] == "PRIVATE_KEY"
-    assert direct_reality["streamSettings"]["realitySettings"]["dest"] == "yandex.ru:443"
-    assert direct_reality["streamSettings"]["realitySettings"]["serverNames"] == ["yandex.ru"]
+    assert direct_reality["streamSettings"]["realitySettings"]["dest"] == "www.yandex.ru:443"
+    assert direct_reality["streamSettings"]["realitySettings"]["serverNames"] == ["www.yandex.ru", "yandex.ru"]
     cdn_ws = next(inbound for inbound in config["inbounds"] if inbound["tag"] == "cdn-ws-in")
     assert cdn_ws["listen"] == "127.0.0.1"
     assert cdn_ws["port"] == 10086
@@ -831,11 +953,33 @@ def test_server2_xray_api_config_preserves_old_chain_client() -> None:
     assert xhttp["streamSettings"]["network"] == "xhttp"
     assert xhttp["streamSettings"]["xhttpSettings"] == {"path": "/kvpn-xhttp", "mode": "packet-up"}
     assert "flow" not in xhttp["settings"]["clients"][0]
+    noflow = next(inbound for inbound in config["inbounds"] if inbound["tag"] == "direct-reality-noflow-8443")
+    assert noflow["listen"] == "0.0.0.0"
+    assert noflow["port"] == 8443
+    assert noflow["streamSettings"]["network"] == "tcp"
+    assert noflow["streamSettings"]["security"] == "reality"
+    assert noflow["streamSettings"]["realitySettings"]["privateKey"] == "PRIVATE_KEY"
+    assert noflow["streamSettings"]["realitySettings"]["dest"] == "www.yandex.ru:443"
+    assert noflow["streamSettings"]["realitySettings"]["serverNames"] == ["www.yandex.ru", "yandex.ru"]
+    hysteria = next(inbound for inbound in config["inbounds"] if inbound["tag"] == "hysteria2-udp-443")
+    assert hysteria["listen"] == "0.0.0.0"
+    assert hysteria["port"] == 443
+    assert hysteria["protocol"] == "hysteria"
+    assert hysteria["settings"] == {"version": 2, "users": []}
+    assert hysteria["streamSettings"]["network"] == "hysteria"
+    assert hysteria["streamSettings"]["security"] == "tls"
     assert any(inbound["tag"] == "api" for inbound in config["inbounds"])
     assert config["routing"]["rules"][0] == {"type": "field", "inboundTag": ["api"], "outboundTag": "api"}
     assert {
         "type": "field",
-        "inboundTag": ["cdn-ws-in", "direct-reality-8443", "upstream-in", "xhttp-in"],
+        "inboundTag": [
+            "cdn-ws-in",
+            "direct-reality-8443",
+            "direct-reality-noflow-8443",
+            "hysteria2-udp-443",
+            "upstream-in",
+            "xhttp-in",
+        ],
         "network": "tcp,udp",
         "outboundTag": "direct",
     } in config["routing"]["rules"]
@@ -946,6 +1090,37 @@ def test_remote_reconcile_can_strip_managed_users_from_config() -> None:
     assert config["inbounds"][0]["settings"]["clients"] == [
         {"id": "old-chain-id", "email": "old-server@chain.local"},
     ]
+
+
+def test_remote_reconcile_builds_hysteria2_api_payload_with_auth_users() -> None:
+    config = {
+        "inbounds": [
+            {
+                "tag": "hysteria2-udp-443",
+                "protocol": "hysteria",
+                "settings": {"version": 2, "users": []},
+                "streamSettings": {"network": "hysteria", "security": "tls"},
+            }
+        ]
+    }
+
+    payload = build_adu_payload(
+        config,
+        inbound_tag="hysteria2-udp-443",
+        email="user-123@vpn.local",
+        user_uuid="00000000-0000-0000-0000-000000000001",
+        flow="xtls-rprx-vision",
+    )
+
+    inbound = payload["inbounds"][0]
+    assert inbound["settings"]["users"] == [
+        {
+            "auth": "00000000-0000-0000-0000-000000000001",
+            "email": "user-123@vpn.local",
+            "level": 0,
+        }
+    ]
+    assert "clients" not in inbound["settings"]
 
 
 def test_runtime_user_match_skips_existing_same_uuid_user() -> None:

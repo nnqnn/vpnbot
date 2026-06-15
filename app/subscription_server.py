@@ -15,6 +15,7 @@ from dotenv import load_dotenv
 
 from app.services.subscription_builder import (
     SubscriptionProfile,
+    build_debug_xray_json_subscription_response,
     build_subscription_response,
     build_happ_link,
     build_subscription_url,
@@ -56,7 +57,7 @@ class RuntimeConfig:
             vless_public_port=int(_env("VLESS_PUBLIC_PORT", "443")),
             vless_security=_env("VLESS_SECURITY", "reality"),
             vless_type=_env("VLESS_TYPE", "tcp"),
-            vless_sni=_env("VLESS_SNI", "yandex.ru"),
+            vless_sni=_env("VLESS_SNI", "www.yandex.ru"),
             vless_flow=_env("VLESS_FLOW", "xtls-rprx-vision"),
             vless_fp=_env("VLESS_FP", "chrome"),
             vless_pbk=_env("VLESS_PBK", ""),
@@ -79,6 +80,29 @@ class RuntimeConfig:
             fallback_vless_sid=_env("VLESS_FALLBACK_SID", "a1b2c3d4e5f6a7b8"),
             fallback_vless_path=_env("VLESS_FALLBACK_PATH", ""),
             fallback_vless_xhttp_mode=_env("VLESS_FALLBACK_XHTTP_MODE", "packet-up"),
+            noflow_vless_public_host=_env("VLESS_NOFLOW_PUBLIC_HOST", ""),
+            noflow_vless_public_port=int(_env("VLESS_NOFLOW_PUBLIC_PORT", "8443")),
+            noflow_vless_security=_env("VLESS_NOFLOW_SECURITY", "reality"),
+            noflow_vless_type=_env("VLESS_NOFLOW_TYPE", "tcp"),
+            noflow_vless_sni=_env("VLESS_NOFLOW_SNI", "www.yandex.ru"),
+            noflow_vless_fp=_env("VLESS_NOFLOW_FP", "chrome"),
+            noflow_vless_pbk=_env("VLESS_NOFLOW_PBK", ""),
+            noflow_vless_sid=_env("VLESS_NOFLOW_SID", "a1b2c3d4e5f6a7b8"),
+            noflow_vless_path=_env("VLESS_NOFLOW_PATH", ""),
+            noflow_vless_xhttp_mode=_env("VLESS_NOFLOW_XHTTP_MODE", "packet-up"),
+            xhttp_vless_public_host=_env("VLESS_XHTTP_PUBLIC_HOST", ""),
+            xhttp_vless_public_port=int(_env("VLESS_XHTTP_PUBLIC_PORT", "8444")),
+            xhttp_vless_security=_env("VLESS_XHTTP_SECURITY", "tls"),
+            xhttp_vless_type=_env("VLESS_XHTTP_TYPE", "xhttp"),
+            xhttp_vless_sni=_env("VLESS_XHTTP_SNI", "s2.nnqnn.tech"),
+            xhttp_vless_fp=_env("VLESS_XHTTP_FP", "chrome"),
+            xhttp_vless_path=_env("VLESS_XHTTP_PATH", "/kvpn-xhttp"),
+            xhttp_vless_xhttp_mode=_env("VLESS_XHTTP_XHTTP_MODE", "packet-up"),
+            hysteria2_public_host=_env("HYSTERIA2_PUBLIC_HOST", ""),
+            hysteria2_public_port=int(_env("HYSTERIA2_PUBLIC_PORT", "443")),
+            hysteria2_sni=_env("HYSTERIA2_SNI", "s2.nnqnn.tech"),
+            hysteria2_fp=_env("HYSTERIA2_FP", "chrome"),
+            hysteria2_udp_idle_timeout=int(_env("HYSTERIA2_UDP_IDLE_TIMEOUT", "60")),
             legacy_vless_public_host=_env("VLESS_LEGACY_PUBLIC_HOST", ""),
             legacy_vless_public_port=int(_env("VLESS_LEGACY_PUBLIC_PORT", "8443")),
             legacy_vless_security=_env("VLESS_LEGACY_SECURITY", "reality"),
@@ -220,6 +244,9 @@ class SubscriptionHandler(BaseHTTPRequestHandler):
         if len(parts) == 3 and parts[0] == "add":
             self._send_happ_redirect(parts[1], parts[2])
             return
+        if len(parts) == 3 and parts[0] == "add-links":
+            self._send_happ_redirect(parts[1], parts[2], format_name="links")
+            return
 
         if self.server.state.config.origin_secret:
             provided = self.headers.get("x-tgvpn-origin-secret", "")
@@ -238,17 +265,32 @@ class SubscriptionHandler(BaseHTTPRequestHandler):
             self._send_text(HTTPStatus.NOT_FOUND, "not found")
             return
 
+        if _is_debug_subscription_request(query):
+            response = build_debug_xray_json_subscription_response(
+                snapshot=snapshot,
+                product=product,
+                token=token,
+                profile=self.server.state.config.profile,
+            )
+            self._send_response(response)
+            return
+
         if not _is_raw_subscription_request(query) and _is_browser_navigation(self.headers.get("accept", "")):
             self._send_happ_redirect(product, token)
             return
 
-        if self.server.state.config.response_format == "base64_links":
+        links_request = _is_links_subscription_request(query)
+        if links_request or self.server.state.config.response_format == "base64_links":
             response = build_subscription_response(
                 snapshot=snapshot,
                 product=product,
                 token=token,
                 profile=self.server.state.config.profile,
-                whitelist_source_text=self.server.state.whitelist_text() if raw_user.get("whitelist_enabled") else "",
+                whitelist_source_text=(
+                    self.server.state.whitelist_text()
+                    if raw_user.get("whitelist_enabled") and not links_request
+                    else ""
+                ),
             )
         else:
             needs_whitelist_profile = bool(
@@ -265,6 +307,13 @@ class SubscriptionHandler(BaseHTTPRequestHandler):
                 profile=self.server.state.config.profile,
                 whitelist_profile=self.server.state.whitelist_profile() if needs_whitelist_profile else None,
             )
+        if response is None:
+            self._send_text(HTTPStatus.NOT_FOUND, "not found")
+            return
+
+        self._send_response(response)
+
+    def _send_response(self, response) -> None:
         if response is None:
             self._send_text(HTTPStatus.NOT_FOUND, "not found")
             return
@@ -307,8 +356,13 @@ class SubscriptionHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
-    def _send_happ_redirect(self, product: str, token: str) -> None:
-        https_url = _raw_subscription_url(self.server.state.config.profile.public_base_url, product, token)
+    def _send_happ_redirect(self, product: str, token: str, *, format_name: str = "raw") -> None:
+        https_url = _formatted_subscription_url(
+            self.server.state.config.profile.public_base_url,
+            product,
+            token,
+            format_name,
+        )
         happ_url = build_happ_link(https_url)
         html = (
             '<!doctype html><html><head><meta charset="utf-8">'
@@ -370,12 +424,30 @@ def _env_bool(key: str, default: bool) -> bool:
 
 
 def _raw_subscription_url(base_url: str, product: str, token: str) -> str:
-    return f"{build_subscription_url(base_url, product, token)}?format=raw"
+    return _formatted_subscription_url(base_url, product, token, "raw")
+
+
+def _links_subscription_url(base_url: str, product: str, token: str) -> str:
+    return _formatted_subscription_url(base_url, product, token, "links")
+
+
+def _formatted_subscription_url(base_url: str, product: str, token: str, format_name: str) -> str:
+    return f"{build_subscription_url(base_url, product, token)}?format={format_name}"
 
 
 def _is_raw_subscription_request(query: dict[str, list[str]]) -> bool:
     values = query.get("format", []) + query.get("raw", [])
     return any(str(value).strip().lower() in {"1", "true", "yes", "raw", "json"} for value in values)
+
+
+def _is_links_subscription_request(query: dict[str, list[str]]) -> bool:
+    values = query.get("format", []) + query.get("links", [])
+    return any(str(value).strip().lower() in {"links", "base64", "base64_links", "vless", "1", "true", "yes"} for value in values)
+
+
+def _is_debug_subscription_request(query: dict[str, list[str]]) -> bool:
+    values = query.get("format", []) + query.get("debug", [])
+    return any(str(value).strip().lower() in {"debug", "diag", "1", "true", "yes"} for value in values)
 
 
 def _is_browser_navigation(accept_header: str) -> bool:
