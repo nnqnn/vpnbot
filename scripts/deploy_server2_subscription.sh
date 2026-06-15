@@ -206,14 +206,14 @@ tar -xzf /tmp/tgvpn-server2-subscription.tar.gz
 apt-get update >/dev/null
 DEBIAN_FRONTEND=noninteractive apt-get install -y python3-httpx python3-dotenv curl >/dev/null
 if [[ -f /etc/letsencrypt/live/s2.nnqnn.tech/fullchain.pem && -f /etc/letsencrypt/live/s2.nnqnn.tech/privkey.pem ]]; then
-  xray_user="$(systemctl show -p User --value xray.service 2>/dev/null || true)"
-  xray_group="$(systemctl show -p Group --value xray.service 2>/dev/null || true)"
-  xray_user="${xray_user:-nobody}"
-  xray_group="${xray_group:-nogroup}"
+  xray_user="\$(systemctl show -p User --value xray.service 2>/dev/null || true)"
+  xray_group="\$(systemctl show -p Group --value xray.service 2>/dev/null || true)"
+  xray_user="\${xray_user:-nobody}"
+  xray_group="\${xray_group:-nogroup}"
   mkdir -p /usr/local/etc/xray/certs
   cp -L /etc/letsencrypt/live/s2.nnqnn.tech/fullchain.pem /usr/local/etc/xray/certs/s2.fullchain.pem
   cp -L /etc/letsencrypt/live/s2.nnqnn.tech/privkey.pem /usr/local/etc/xray/certs/s2.privkey.pem
-  chown "$xray_user:$xray_group" /usr/local/etc/xray/certs/s2.fullchain.pem /usr/local/etc/xray/certs/s2.privkey.pem
+  chown "\$xray_user:\$xray_group" /usr/local/etc/xray/certs/s2.fullchain.pem /usr/local/etc/xray/certs/s2.privkey.pem
   chmod 640 /usr/local/etc/xray/certs/s2.fullchain.pem /usr/local/etc/xray/certs/s2.privkey.pem
 fi
 printf 'tcp_bbr\n' > /etc/modules-load.d/tgvpn-bbr.conf
