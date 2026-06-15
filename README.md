@@ -427,7 +427,7 @@ Bot/PostgreSQL на server #1 -> snapshot + Xray API по SSH -> server #2
 Пользователь -> s2.nnqnn.tech:8444 HTTPS endpoint -> персональная Happ-подписка
 Основной VPN для РФ -> 89.125.50.96:443 -> Xray direct-reality-8443 напрямую
 Fallback Reality no-flow -> 89.125.50.96:8443 -> Xray direct-reality-noflow-8443
-Fallback Hysteria2 -> 89.125.50.96:443/udp -> Xray hysteria2-udp-443
+Fallback Hysteria2 -> 89.125.50.96:443/udp -> official hysteria-server.service
 Старая цепочка -> server #1 -> server #2 upstream-in:9443
 Fallback XHTTP -> s2.nnqnn.tech:8444 -> Nginx HTTPS -> Xray xhttp-in:10087
 ```
@@ -497,7 +497,6 @@ SUBSCRIPTION_NOFLOW_REALITY_PORT=8443
 SUBSCRIPTION_XHTTP_PORT=10087
 SUBSCRIPTION_XHTTP_PATH=/kvpn-xhttp
 SUBSCRIPTION_XHTTP_MODE=packet-up
-SUBSCRIPTION_HYSTERIA2_INBOUND_TAG=hysteria2-udp-443
 SUBSCRIPTION_HYSTERIA2_PORT=443
 SUBSCRIPTION_PUBLIC_VLESS_PORT=443
 SUBSCRIPTION_NGINX_HTTPS_BACKEND_PORT=18443
@@ -508,7 +507,7 @@ SUBSCRIPTION_ENABLE_CLOUDFLARED=false
 `SUBSCRIPTION_LINKS_ENABLED=true` включает выдачу Happ-ссылок через `s2.nnqnn.tech`.
 Активный пользователь получает в одной Happ-подписке несколько отдельных элементов основного VPN: Reality Vision `89.125.50.96:443/tcp`, Reality no-flow `89.125.50.96:8443/tcp`, XHTTP/TLS `s2.nnqnn.tech:8444/kvpn-xhttp` и Hysteria2 `89.125.50.96:443/udp`. Если куплен обход белых списков, профиль worker-а `vpn.nnqnn.tech` добавляется пятым отдельным элементом в тот же JSON-список. На server #2 публичный TCP `443` слушает Xray напрямую; Nginx stream на `443` не используется. HTTPS-подписка доступна отдельно на `s2.nnqnn.tech:8444`. Reality `upstream-in:9443` остается включенным для старой цепочки `server #1 -> server #2`.
 
-VLESS-пользователи синхронизируются через Xray API per-user. Hysteria2 в этой схеме использует отдельный shared auth из `/root/tgvpn-hysteria2-auth.txt` на server #2 и выдается только внутри персональной подписки активным пользователям.
+VLESS-пользователи синхронизируются через Xray API per-user без перезапуска Xray и без раздувания `config.json`. Hysteria2 не управляется через Xray API: он поднимается отдельным официальным `hysteria-server.service` на UDP `443`, использует shared auth из `/root/tgvpn-hysteria2-auth.txt` на server #2 и выдается только внутри персональной подписки активным пользователям.
 
 На server #2:
 

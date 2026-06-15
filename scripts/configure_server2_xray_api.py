@@ -171,15 +171,11 @@ def ensure_xray_api(
         path=xhttp_path,
         mode=xhttp_mode,
     ) or changed
-    changed = ensure_hysteria2_inbound(
-        data,
-        inbound_tag=hysteria2_inbound_tag,
-        port=hysteria2_port,
-        cert_file=hysteria2_cert_file,
-        key_file=hysteria2_key_file,
-        masquerade_url=hysteria2_masquerade_url,
-        auth=hysteria2_auth,
-    ) or changed
+    # Hysteria2 is served by the official hysteria-server daemon on UDP/443.
+    # Keeping an Xray Hysteria inbound here creates a profile that can receive
+    # packets but does not produce a stable working session on the deployed Xray
+    # version, so remove old generated inbounds if they exist.
+    changed = remove_inbound_and_routing_references(data, hysteria2_inbound_tag) or changed
 
     api = data.setdefault("api", {})
     if api.get("tag") != "api":
@@ -219,7 +215,6 @@ def ensure_xray_api(
             noflow_reality_inbound_tag,
             cdn_ws_inbound_tag,
             xhttp_inbound_tag,
-            hysteria2_inbound_tag,
         }
     )
     vpn_direct_rule = {
@@ -547,6 +542,46 @@ def remove_conflicting_public_migrate_inbound(data: dict[str, Any], *, keep_tag:
         return False
     data["inbounds"] = updated
     return True
+
+
+def remove_inbound_and_routing_references(data: dict[str, Any], tag: str) -> bool:
+    changed = False
+    inbounds = data.setdefault("inbounds", [])
+    if isinstance(inbounds, list):
+        updated_inbounds = [
+            inbound
+            for inbound in inbounds
+            if not (isinstance(inbound, dict) and inbound.get("tag") == tag)
+        ]
+        if len(updated_inbounds) != len(inbounds):
+            data["inbounds"] = updated_inbounds
+            changed = True
+
+    routing = data.setdefault("routing", {})
+    rules = routing.setdefault("rules", [])
+    if not isinstance(rules, list):
+        return changed
+
+    updated_rules: list[dict[str, Any]] = []
+    for rule in rules:
+        if not isinstance(rule, dict):
+            updated_rules.append(rule)
+            continue
+        inbound_tags = rule.get("inboundTag")
+        if isinstance(inbound_tags, list) and tag in inbound_tags:
+            next_tags = [item for item in inbound_tags if item != tag]
+            if next_tags:
+                rule = dict(rule)
+                rule["inboundTag"] = next_tags
+                updated_rules.append(rule)
+            changed = True
+            continue
+        updated_rules.append(rule)
+
+    if updated_rules != rules:
+        routing["rules"] = updated_rules
+        changed = True
+    return changed
 
 
 def ensure_direct_vless_reality_inbound(

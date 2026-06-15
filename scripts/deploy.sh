@@ -205,7 +205,6 @@ upsert_env_value SUBSCRIPTION_PUBLIC_REALITY_PORT 443
 upsert_env_value SUBSCRIPTION_PUBLIC_VLESS_PORT 443
 upsert_env_value SUBSCRIPTION_NOFLOW_REALITY_INBOUND_TAG direct-reality-noflow-8443
 upsert_env_value SUBSCRIPTION_NOFLOW_REALITY_PORT 8443
-upsert_env_value SUBSCRIPTION_HYSTERIA2_INBOUND_TAG hysteria2-udp-443
 upsert_env_value SUBSCRIPTION_HYSTERIA2_PORT 443
 
 if ! systemctl is-active --quiet xray; then

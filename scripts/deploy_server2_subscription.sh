@@ -233,6 +233,67 @@ PY
     chmod 600 /root/tgvpn-hysteria2-auth.txt
   fi
 fi
+
+configure_hysteria2_daemon() {
+  local cert_dir="/etc/letsencrypt/live/\$direct_host"
+  if [[ ! -f "\$cert_dir/fullchain.pem" || ! -f "\$cert_dir/privkey.pem" ]]; then
+    echo "Skipping Hysteria2 daemon setup: Let's Encrypt certificate for \$direct_host is not available yet."
+    return 0
+  fi
+
+  if ! command -v hysteria >/dev/null 2>&1; then
+    curl -fsSL https://get.hy2.sh/ | bash
+  fi
+
+  mkdir -p /etc/hysteria/certs
+  cp -L "\$cert_dir/fullchain.pem" /etc/hysteria/certs/s2.fullchain.pem
+  cp -L "\$cert_dir/privkey.pem" /etc/hysteria/certs/s2.privkey.pem
+  if id hysteria >/dev/null 2>&1; then
+    chown -R hysteria:hysteria /etc/hysteria/certs
+  else
+    chown -R root:root /etc/hysteria/certs
+  fi
+  chmod 750 /etc/hysteria/certs
+  chmod 640 /etc/hysteria/certs/s2.fullchain.pem /etc/hysteria/certs/s2.privkey.pem
+
+  cat > /etc/hysteria/config.yaml <<HYSTERIA_CONFIG
+listen: :\$hysteria2_port
+
+tls:
+  cert: /etc/hysteria/certs/s2.fullchain.pem
+  key: /etc/hysteria/certs/s2.privkey.pem
+
+auth:
+  type: password
+  password: "\$hysteria2_auth"
+
+resolver:
+  type: udp
+  udp:
+    addr: 1.1.1.1:53
+
+outbounds:
+  - name: direct
+    type: direct
+    direct:
+      mode: 4
+
+masquerade:
+  type: proxy
+  proxy:
+    url: \$hysteria2_masquerade_url
+    rewriteHost: true
+HYSTERIA_CONFIG
+
+  systemctl daemon-reload
+  systemctl enable --now hysteria-server.service
+  systemctl restart hysteria-server.service
+  sleep 1
+  systemctl is-active --quiet hysteria-server.service
+}
+
+configure_hysteria2_daemon
+
 printf 'tcp_bbr\n' > /etc/modules-load.d/tgvpn-bbr.conf
 modprobe tcp_bbr 2>/dev/null || true
 cat > /etc/sysctl.d/99-tgvpn-network.conf <<SYSCTL
@@ -281,12 +342,6 @@ python3 "\$server_dir/scripts/configure_server2_xray_api.py" \
 	  --xhttp-port "\$xhttp_port" \
 	  --xhttp-path "\$xhttp_path" \
 	  --xhttp-mode "\$xhttp_mode" \
-	  --hysteria2-inbound-tag "\$hysteria2_inbound_tag" \
-	  --hysteria2-port "\$hysteria2_port" \
-	  --hysteria2-cert-file "\$hysteria2_cert_file" \
-	  --hysteria2-key-file "\$hysteria2_key_file" \
-	  --hysteria2-masquerade-url "\$hysteria2_masquerade_url" \
-	  --hysteria2-auth "\$hysteria2_auth" \
   --server-name www.cloudflare.com \
   --server-name www.yandex.ru \
   --server-name yandex.ru \
@@ -584,6 +639,12 @@ nginx_https_backend_port="$NGINX_HTTPS_BACKEND_PORT"
 nginx_https_public_port="$NGINX_HTTPS_PUBLIC_PORT"
 subscription_port="$SUBSCRIPTION_PORT"
 letsencrypt_email="$LETSENCRYPT_EMAIL"
+hysteria2_port="$HYSTERIA2_PORT"
+hysteria2_masquerade_url="$HYSTERIA2_MASQUERADE_URL"
+hysteria2_auth="$HYSTERIA2_AUTH"
+if [[ -z "\$hysteria2_auth" && -f /root/tgvpn-hysteria2-auth.txt ]]; then
+  hysteria2_auth="\$(tr -d '\r\n' < /root/tgvpn-hysteria2-auth.txt)"
+fi
 
 apt-get update >/dev/null
 DEBIAN_FRONTEND=noninteractive apt-get install -y nginx libnginx-mod-stream certbot python3-certbot-nginx >/dev/null
@@ -625,6 +686,55 @@ else
   certbot_args+=(--register-unsafely-without-email)
 fi
 certbot "\${certbot_args[@]}"
+
+if [[ -n "\$hysteria2_auth" ]]; then
+  if ! command -v hysteria >/dev/null 2>&1; then
+    curl -fsSL https://get.hy2.sh/ | bash
+  fi
+  mkdir -p /etc/hysteria/certs
+  cp -L "/etc/letsencrypt/live/\$direct_host/fullchain.pem" /etc/hysteria/certs/s2.fullchain.pem
+  cp -L "/etc/letsencrypt/live/\$direct_host/privkey.pem" /etc/hysteria/certs/s2.privkey.pem
+  if id hysteria >/dev/null 2>&1; then
+    chown -R hysteria:hysteria /etc/hysteria/certs
+  else
+    chown -R root:root /etc/hysteria/certs
+  fi
+  chmod 750 /etc/hysteria/certs
+  chmod 640 /etc/hysteria/certs/s2.fullchain.pem /etc/hysteria/certs/s2.privkey.pem
+  cat > /etc/hysteria/config.yaml <<HYSTERIA_CONFIG
+listen: :\$hysteria2_port
+
+tls:
+  cert: /etc/hysteria/certs/s2.fullchain.pem
+  key: /etc/hysteria/certs/s2.privkey.pem
+
+auth:
+  type: password
+  password: "\$hysteria2_auth"
+
+resolver:
+  type: udp
+  udp:
+    addr: 1.1.1.1:53
+
+outbounds:
+  - name: direct
+    type: direct
+    direct:
+      mode: 4
+
+masquerade:
+  type: proxy
+  proxy:
+    url: \$hysteria2_masquerade_url
+    rewriteHost: true
+HYSTERIA_CONFIG
+  systemctl daemon-reload
+  systemctl enable --now hysteria-server.service
+  systemctl restart hysteria-server.service
+  sleep 1
+  systemctl is-active --quiet hysteria-server.service
+fi
 
 cp "\$server_dir/deploy/nginx/s2.nnqnn.tech.conf" /etc/nginx/sites-available/tgvpn-subscription.conf
 escaped_xhttp_path="\$(printf '%s' "\$xhttp_path" | sed 's/[\/&]/\\\\&/g')"

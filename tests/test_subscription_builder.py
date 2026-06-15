@@ -920,9 +920,26 @@ def test_server2_xray_api_config_preserves_old_chain_client() -> None:
                         "shortIds": ["a1b2c3d4e5f6a7b8"],
                     },
                 },
+            },
+            {
+                "tag": "hysteria2-udp-443",
+                "listen": "0.0.0.0",
+                "port": 443,
+                "protocol": "hysteria",
+                "settings": {"version": 2},
+                "streamSettings": {"network": "hysteria"},
             }
         ],
-        "routing": {"rules": []},
+        "routing": {
+            "rules": [
+                {
+                    "type": "field",
+                    "inboundTag": ["hysteria2-udp-443", "upstream-in"],
+                    "network": "tcp,udp",
+                    "outboundTag": "direct",
+                }
+            ]
+        },
     }
 
     changed = ensure_xray_api(config, api_port=10085)
@@ -960,14 +977,7 @@ def test_server2_xray_api_config_preserves_old_chain_client() -> None:
     assert noflow["streamSettings"]["realitySettings"]["privateKey"] == "PRIVATE_KEY"
     assert noflow["streamSettings"]["realitySettings"]["dest"] == "www.yandex.ru:443"
     assert noflow["streamSettings"]["realitySettings"]["serverNames"] == ["www.yandex.ru", "yandex.ru"]
-    hysteria = next(inbound for inbound in config["inbounds"] if inbound["tag"] == "hysteria2-udp-443")
-    assert hysteria["listen"] == "0.0.0.0"
-    assert hysteria["port"] == 443
-    assert hysteria["protocol"] == "hysteria"
-    assert hysteria["settings"] == {"version": 2}
-    assert hysteria["streamSettings"]["network"] == "hysteria"
-    assert hysteria["streamSettings"]["security"] == "tls"
-    assert hysteria["streamSettings"]["hysteriaSettings"]["auth"] == ""
+    assert not any(inbound["tag"] == "hysteria2-udp-443" for inbound in config["inbounds"])
     assert any(inbound["tag"] == "api" for inbound in config["inbounds"])
     assert config["routing"]["rules"][0] == {"type": "field", "inboundTag": ["api"], "outboundTag": "api"}
     assert {
@@ -976,7 +986,6 @@ def test_server2_xray_api_config_preserves_old_chain_client() -> None:
             "cdn-ws-in",
             "direct-reality-8443",
             "direct-reality-noflow-8443",
-            "hysteria2-udp-443",
             "upstream-in",
             "xhttp-in",
         ],
