@@ -417,7 +417,7 @@ def build_hysteria2_xray_outbound(
     *,
     tag: str = "proxy",
 ) -> dict[str, Any] | None:
-    if not profile.hysteria2_public_host or not profile.hysteria2_auth:
+    if not profile.hysteria2_public_host:
         return None
     host = profile.hysteria2_public_host
     return {
@@ -437,7 +437,7 @@ def build_hysteria2_xray_outbound(
             },
             "hysteriaSettings": {
                 "version": 2,
-                "auth": profile.hysteria2_auth,
+                "auth": user.uuid,
                 "udpIdleTimeout": profile.hysteria2_udp_idle_timeout,
             },
         },

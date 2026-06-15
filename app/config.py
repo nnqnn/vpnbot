@@ -67,6 +67,17 @@ class Settings(BaseSettings):
     xray_remote_port: int = Field(default=22, alias="XRAY_REMOTE_PORT")
     xray_remote_key_path: str = Field(default="", alias="XRAY_REMOTE_KEY_PATH")
     xray_remote_password: str = Field(default="", alias="XRAY_REMOTE_PASSWORD")
+    online_devices_remote_helper_path: str = Field(
+        default="/home/tgvpn/scripts/query_server2_online_devices.py",
+        alias="ONLINE_DEVICES_REMOTE_HELPER_PATH",
+    )
+    hysteria2_stats_url: str = Field(default="http://127.0.0.1:9999", alias="HYSTERIA2_STATS_URL")
+    hysteria2_stats_secret: str = Field(default="", alias="HYSTERIA2_STATS_SECRET")
+    hysteria2_stats_secret_file: str = Field(
+        default="/root/tgvpn-hysteria2-stats-secret.txt",
+        alias="HYSTERIA2_STATS_SECRET_FILE",
+    )
+    hysteria2_stats_timeout_seconds: int = Field(default=5, alias="HYSTERIA2_STATS_TIMEOUT_SECONDS")
 
     auto_renew_interval_minutes: int = Field(default=30, alias="AUTO_RENEW_INTERVAL_MINUTES")
     payment_poll_interval_seconds: int = Field(default=60, alias="PAYMENT_POLL_INTERVAL_SECONDS")

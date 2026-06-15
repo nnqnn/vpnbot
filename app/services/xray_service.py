@@ -8,6 +8,7 @@ import os
 import re
 import shlex
 import tempfile
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 from urllib.parse import quote, urlencode
@@ -15,6 +16,17 @@ from urllib.parse import quote, urlencode
 from app.config import Settings
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True, slots=True)
+class OnlineDeviceStats:
+    email: str
+    xray_ips: frozenset[str]
+    hysteria_count: int
+
+    @property
+    def total(self) -> int:
+        return len(self.xray_ips) + self.hysteria_count
 
 
 class XrayService:
@@ -193,6 +205,50 @@ class XrayService:
             return normalized
         return set()
 
+    async def get_users_online_device_stats(self, telegram_ids: list[int]) -> dict[int, OnlineDeviceStats] | None:
+        if not self.settings.xray_api_enabled:
+            return None
+        if not telegram_ids:
+            return {}
+
+        if self._is_ssh_api_mode():
+            return await self._get_remote_online_device_stats(telegram_ids)
+
+        stats: dict[int, OnlineDeviceStats] = {}
+        for telegram_id in telegram_ids:
+            email = self.user_email(telegram_id)
+            ips = await self.get_user_online_ips(telegram_id)
+            if ips is None:
+                return None
+            stats[telegram_id] = OnlineDeviceStats(email=email, xray_ips=frozenset(ips), hysteria_count=0)
+        return stats
+
+    async def kick_hysteria_user(self, telegram_id: int) -> bool:
+        if not self._is_ssh_api_mode():
+            return False
+
+        payload = self._build_online_devices_payload([], kick_emails=[self.user_email(telegram_id)])
+        local_payload = await asyncio.to_thread(self._write_temp_json, payload)
+        remote_payload = f"/tmp/tgvpn-online-devices-{os.getpid()}-{Path(local_payload).name}"
+        try:
+            upload_code, upload_stdout, upload_stderr = await self._scp_to_remote(local_payload, remote_payload)
+            if upload_code != 0:
+                logger.warning("Failed to upload Hysteria kick payload: %s", upload_stderr.strip() or upload_stdout.strip())
+                return False
+
+            command = (
+                f"python3 {shlex.quote(self.settings.online_devices_remote_helper_path)} "
+                f"--payload {shlex.quote(remote_payload)}"
+            )
+            code, stdout, stderr = await self._run_remote_shell_command(command)
+            if code != 0:
+                logger.warning("Hysteria kick helper failed: %s", stderr.strip() or stdout.strip())
+                return False
+            return True
+        finally:
+            await self._run_remote_shell_command(f"rm -f {shlex.quote(remote_payload)}")
+            await asyncio.to_thread(self._safe_unlink, local_payload)
+
     async def reload_xray(self) -> None:
         primary_command = self.settings.xray_reload_command.strip()
         code, stdout, stderr = await self._run_shell_command(primary_command)
@@ -347,6 +403,79 @@ class XrayService:
         finally:
             await self._run_remote_shell_command(f"rm -f {shlex.quote(remote_payload)}")
             await asyncio.to_thread(self._safe_unlink, local_payload)
+
+    async def _get_remote_online_device_stats(self, telegram_ids: list[int]) -> dict[int, OnlineDeviceStats] | None:
+        emails_by_telegram_id = {telegram_id: self.user_email(telegram_id) for telegram_id in telegram_ids}
+        payload = self._build_online_devices_payload(list(emails_by_telegram_id.values()), kick_emails=[])
+        local_payload = await asyncio.to_thread(self._write_temp_json, payload)
+        remote_payload = f"/tmp/tgvpn-online-devices-{os.getpid()}-{Path(local_payload).name}"
+        try:
+            upload_code, upload_stdout, upload_stderr = await self._scp_to_remote(local_payload, remote_payload)
+            if upload_code != 0:
+                logger.warning("Failed to upload online-device payload: %s", upload_stderr.strip() or upload_stdout.strip())
+                return None
+
+            command = (
+                f"python3 {shlex.quote(self.settings.online_devices_remote_helper_path)} "
+                f"--payload {shlex.quote(remote_payload)}"
+            )
+            code, stdout, stderr = await self._run_remote_shell_command(command)
+            if code != 0:
+                logger.warning("Remote online-device helper failed: %s", stderr.strip() or stdout.strip())
+                return None
+            return self._parse_online_device_stats(stdout, emails_by_telegram_id)
+        finally:
+            await self._run_remote_shell_command(f"rm -f {shlex.quote(remote_payload)}")
+            await asyncio.to_thread(self._safe_unlink, local_payload)
+
+    def _build_online_devices_payload(self, emails: list[str], *, kick_emails: list[str]) -> dict[str, Any]:
+        return {
+            "xray_bin_path": self.settings.xray_bin_path,
+            "xray_api_server": self.settings.xray_api_server,
+            "xray_api_timeout_seconds": self.settings.xray_api_timeout_seconds,
+            "command_timeout_seconds": self.settings.xray_remote_command_timeout_seconds,
+            "hysteria_stats_url": self.settings.hysteria2_stats_url,
+            "hysteria_stats_secret": self.settings.hysteria2_stats_secret,
+            "hysteria_stats_secret_file": self.settings.hysteria2_stats_secret_file,
+            "hysteria_stats_timeout_seconds": self.settings.hysteria2_stats_timeout_seconds,
+            "emails": emails,
+            "kick_emails": kick_emails,
+        }
+
+    @staticmethod
+    def _parse_online_device_stats(
+        stdout: str,
+        emails_by_telegram_id: dict[int, str],
+    ) -> dict[int, OnlineDeviceStats] | None:
+        try:
+            payload = json.loads(stdout)
+        except json.JSONDecodeError:
+            logger.warning("Online-device helper returned non-JSON: %s", stdout.strip())
+            return None
+        if not isinstance(payload, dict) or not payload.get("ok"):
+            logger.warning("Online-device helper returned errors: %s", payload)
+            return None
+        users = payload.get("users")
+        if not isinstance(users, dict):
+            logger.warning("Online-device helper returned invalid users payload: %s", payload)
+            return None
+
+        stats: dict[int, OnlineDeviceStats] = {}
+        for telegram_id, email in emails_by_telegram_id.items():
+            raw = users.get(email, {})
+            raw_ips = raw.get("xray_ips", []) if isinstance(raw, dict) else []
+            xray_ips = frozenset(str(ip) for ip in raw_ips if str(ip))
+            raw_hysteria_count = raw.get("hysteria_count", 0) if isinstance(raw, dict) else 0
+            try:
+                hysteria_count = int(raw_hysteria_count)
+            except (TypeError, ValueError):
+                hysteria_count = 0
+            stats[telegram_id] = OnlineDeviceStats(
+                email=email,
+                xray_ips=xray_ips,
+                hysteria_count=max(0, hysteria_count),
+            )
+        return stats
 
     async def _run_adu_with_payload(self, payload: dict[str, Any]) -> tuple[int, str, str]:
         if self._is_ssh_api_mode():

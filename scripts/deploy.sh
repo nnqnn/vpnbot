@@ -191,6 +191,11 @@ ensure_csv_env_contains() {
 upsert_env_value XRAY_INBOUND_TAG direct-reality-8443
 upsert_env_value XRAY_EXTRA_INBOUND_TAGS upstream-in,cdn-ws-in,xhttp-in,direct-reality-noflow-8443
 upsert_env_value XRAY_FLOW_INBOUND_TAGS direct-reality-8443,upstream-in
+upsert_env_value ONLINE_DEVICES_REMOTE_HELPER_PATH /home/tgvpn/scripts/query_server2_online_devices.py
+upsert_env_value HYSTERIA2_STATS_URL http://127.0.0.1:9999
+upsert_env_value HYSTERIA2_STATS_SECRET ""
+upsert_env_value HYSTERIA2_STATS_SECRET_FILE /root/tgvpn-hysteria2-stats-secret.txt
+upsert_env_value HYSTERIA2_STATS_TIMEOUT_SECONDS 5
 upsert_env_value VLESS_PUBLIC_HOST 89.125.50.96
 upsert_env_value VLESS_PUBLIC_PORT 443
 upsert_env_value VLESS_SECURITY reality
@@ -289,6 +294,15 @@ fi
 ".venv/bin/python" -m pip install -r requirements.txt
 ".venv/bin/python" -m compileall -q app scripts tests
 
+device_limit_unblock_marker=".device_limit_unblock_v2_done"
+if [[ ! -f "$device_limit_unblock_marker" ]]; then
+  log "Clearing old device-limit blocks once"
+  ".venv/bin/python" scripts/unblock_device_limit_users.py
+  touch "$device_limit_unblock_marker"
+else
+  log "Old device-limit blocks were already cleared"
+fi
+
 log "Restarting ${service}"
 if ! systemctl restart "$service"; then
   rollback "Failed to restart ${service}."
@@ -363,6 +377,28 @@ from pathlib import Path
 configs = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
 if not isinstance(configs, list):
     raise SystemExit("subscription body is not a profile list")
+snapshot = json.loads(Path("logs/subscription_snapshot.json").read_text(encoding="utf-8"))
+expected_uuid = None
+for user in snapshot.get("users", {}).values():
+    if isinstance(user, dict) and user.get("main_vpn_active"):
+        expected_uuid = str(user.get("uuid") or "")
+        break
+if not expected_uuid:
+    raise SystemExit("active user UUID was not found")
+hysteria = next((item for item in configs if isinstance(item, dict) and item.get("remarks") == "Основной #1 🇳🇱"), None)
+if hysteria is None:
+    raise SystemExit("Hysteria main profile was not found")
+hysteria_outbounds = hysteria.get("outbounds")
+if not isinstance(hysteria_outbounds, list) or not hysteria_outbounds:
+    raise SystemExit("Hysteria main profile has no outbounds")
+hysteria_auth = (
+    hysteria_outbounds[0]
+    .get("streamSettings", {})
+    .get("hysteriaSettings", {})
+    .get("auth")
+)
+if hysteria_auth != expected_uuid:
+    raise SystemExit("Hysteria auth is not per-user UUID")
 main = next((item for item in configs if isinstance(item, dict) and item.get("remarks") == "Запасной #3 🇳🇱"), None)
 if main is None:
     raise SystemExit("main VPN profile was not found")

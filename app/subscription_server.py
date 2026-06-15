@@ -233,6 +233,17 @@ class SubscriptionState:
 class SubscriptionHandler(BaseHTTPRequestHandler):
     server_version = "TGVPNSubscription/1.0"
 
+    def do_POST(self) -> None:  # noqa: N802
+        parsed_url = urlsplit(self.path)
+        if parsed_url.path != "/hysteria/auth":
+            self._send_text(HTTPStatus.NOT_FOUND, "not found")
+            return
+
+        payload = self._read_json_body()
+        auth = str(payload.get("auth") or "") if isinstance(payload, dict) else ""
+        response = _build_hysteria_auth_response(self.server.state.load_snapshot(), auth)
+        self._send_json(HTTPStatus.OK, response)
+
     def do_GET(self) -> None:  # noqa: N802
         if self.path == "/healthz":
             self._send_health()
@@ -339,6 +350,29 @@ class SubscriptionHandler(BaseHTTPRequestHandler):
         self.send_header("content-length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)
+
+    def _send_json(self, status: HTTPStatus, payload: dict) -> None:
+        body = json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+        self.send_response(status)
+        self.send_header("content-type", "application/json; charset=utf-8")
+        self.send_header("cache-control", "no-store")
+        self.send_header("content-length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def _read_json_body(self) -> dict:
+        try:
+            length = int(self.headers.get("content-length", "0") or "0")
+        except ValueError:
+            length = 0
+        if length <= 0 or length > 8192:
+            return {}
+        raw = self.rfile.read(length)
+        try:
+            payload = json.loads(raw.decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            return {}
+        return payload if isinstance(payload, dict) else {}
 
     def _send_health(self) -> None:
         snapshot = self.server.state.load_snapshot()
@@ -449,6 +483,32 @@ def _is_links_subscription_request(query: dict[str, list[str]]) -> bool:
 def _is_debug_subscription_request(query: dict[str, list[str]]) -> bool:
     values = query.get("format", []) + query.get("debug", [])
     return any(str(value).strip().lower() in {"debug", "diag", "1", "true", "yes"} for value in values)
+
+
+def _build_hysteria_auth_response(snapshot: dict, auth: str) -> dict:
+    if not auth:
+        return {"ok": False}
+
+    users = snapshot.get("users", {})
+    if not isinstance(users, dict):
+        return {"ok": False}
+
+    for raw_user in users.values():
+        if not isinstance(raw_user, dict):
+            continue
+        if str(raw_user.get("uuid") or "") != auth:
+            continue
+        if not bool(raw_user.get("main_vpn_active")):
+            return {"ok": False}
+        telegram_id = raw_user.get("telegram_id")
+        if telegram_id is None:
+            return {"ok": False}
+        try:
+            normalized_telegram_id = int(telegram_id)
+        except (TypeError, ValueError):
+            return {"ok": False}
+        return {"ok": True, "id": f"user-{normalized_telegram_id}@vpn.local"}
+    return {"ok": False}
 
 
 def _is_browser_navigation(accept_header: str) -> bool:

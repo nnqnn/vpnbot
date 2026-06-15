@@ -13,6 +13,7 @@ from app.bot.handlers.user import _build_raw_vless_access_text, _build_vpn_acces
 from app.main import _run_timed_startup_step
 from app.subscription_server import (
     SubscriptionHandler,
+    _build_hysteria_auth_response,
     _is_browser_navigation,
     _is_links_subscription_request,
     _is_raw_subscription_request,
@@ -29,7 +30,8 @@ from app.services.subscription_builder import (
     build_xray_json_subscription_response,
 )
 from app.services.subscription_sync_service import build_snapshot_payload
-from app.services.xray_service import XrayService
+from app.services.device_limit_service import DeviceLimitService
+from app.services.xray_service import OnlineDeviceStats, XrayService
 from scripts.configure_server2_xray_api import ensure_xray_api
 from scripts.reconcile_server2_xray_users import (
     build_adu_payload,
@@ -450,7 +452,6 @@ def test_xray_json_response_adds_separate_main_fallback_profiles_with_whitelist(
         hysteria2_public_host="89.125.50.96",
         hysteria2_public_port=443,
         hysteria2_sni="s2.nnqnn.tech",
-        hysteria2_auth="SHARED_HY2_AUTH",
     )
     worker_profile = {
         "outbounds": [
@@ -483,7 +484,7 @@ def test_xray_json_response_adds_separate_main_fallback_profiles_with_whitelist(
     assert hysteria["protocol"] == "hysteria"
     assert hysteria["settings"] == {"version": 2, "address": "89.125.50.96", "port": 443}
     assert hysteria["streamSettings"]["network"] == "hysteria"
-    assert hysteria["streamSettings"]["hysteriaSettings"]["auth"] == "SHARED_HY2_AUTH"
+    assert hysteria["streamSettings"]["hysteriaSettings"]["auth"] == "00000000-0000-0000-0000-000000000001"
     noflow = configs[2]["outbounds"][0]
     assert noflow["settings"]["vnext"][0]["port"] == 8443
     assert "flow" not in noflow["settings"]["vnext"][0]["users"][0]
@@ -740,6 +741,40 @@ def test_subscription_links() -> None:
     assert _links_subscription_url("https://vpn.nnqnn.tech/", "kVPN", "abc") == (
         "https://vpn.nnqnn.tech/sub/kVPN/abc?format=links"
     )
+
+
+def test_hysteria_auth_response_allows_only_active_main_vpn_user() -> None:
+    snapshot = {
+        "users": {
+            "active-token": {
+                "telegram_id": 123,
+                "uuid": "00000000-0000-0000-0000-000000000001",
+                "main_vpn_active": True,
+            },
+            "expired-token": {
+                "telegram_id": 456,
+                "uuid": "00000000-0000-0000-0000-000000000002",
+                "main_vpn_active": False,
+            },
+        }
+    }
+
+    assert _build_hysteria_auth_response(snapshot, "00000000-0000-0000-0000-000000000001") == {
+        "ok": True,
+        "id": "user-123@vpn.local",
+    }
+    assert _build_hysteria_auth_response(snapshot, "00000000-0000-0000-0000-000000000002") == {"ok": False}
+    assert _build_hysteria_auth_response(snapshot, "missing") == {"ok": False}
+
+
+def test_device_limit_counts_xray_and_hysteria_together() -> None:
+    stats = {
+        1: OnlineDeviceStats(email="user-1@vpn.local", xray_ips=frozenset({"1.1.1.1", "2.2.2.2", "3.3.3.3"}), hysteria_count=2),
+        2: OnlineDeviceStats(email="user-2@vpn.local", xray_ips=frozenset({"1.1.1.1", "2.2.2.2", "3.3.3.3", "4.4.4.4"}), hysteria_count=0),
+        3: OnlineDeviceStats(email="user-3@vpn.local", xray_ips=frozenset(), hysteria_count=5),
+    }
+
+    assert DeviceLimitService._offending_ids_from_device_stats(stats, max_devices=4) == {1, 3}
 
 
 def test_subscription_server_browser_redirect_detection() -> None:

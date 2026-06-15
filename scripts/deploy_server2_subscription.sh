@@ -23,6 +23,8 @@ HYSTERIA2_CERT_FILE="${SUBSCRIPTION_HYSTERIA2_CERT_FILE:-/usr/local/etc/xray/cer
 HYSTERIA2_KEY_FILE="${SUBSCRIPTION_HYSTERIA2_KEY_FILE:-/usr/local/etc/xray/certs/s2.privkey.pem}"
 HYSTERIA2_MASQUERADE_URL="${SUBSCRIPTION_HYSTERIA2_MASQUERADE_URL:-https://www.yandex.ru/}"
 HYSTERIA2_AUTH="${SUBSCRIPTION_HYSTERIA2_AUTH:-}"
+HYSTERIA2_STATS_LISTEN="${SUBSCRIPTION_HYSTERIA2_STATS_LISTEN:-127.0.0.1:9999}"
+HYSTERIA2_STATS_SECRET="${SUBSCRIPTION_HYSTERIA2_STATS_SECRET:-}"
 PUBLIC_VLESS_PORT="${SUBSCRIPTION_PUBLIC_VLESS_PORT:-443}"
 NGINX_HTTPS_BACKEND_PORT="${SUBSCRIPTION_NGINX_HTTPS_BACKEND_PORT:-18443}"
 NGINX_HTTPS_PUBLIC_PORT="${SUBSCRIPTION_NGINX_HTTPS_PUBLIC_PORT:-8444}"
@@ -104,6 +106,8 @@ load_optional_env SUBSCRIPTION_HYSTERIA2_CERT_FILE
 load_optional_env SUBSCRIPTION_HYSTERIA2_KEY_FILE
 load_optional_env SUBSCRIPTION_HYSTERIA2_MASQUERADE_URL
 load_optional_env SUBSCRIPTION_HYSTERIA2_AUTH
+load_optional_env SUBSCRIPTION_HYSTERIA2_STATS_LISTEN
+load_optional_env SUBSCRIPTION_HYSTERIA2_STATS_SECRET
 load_optional_env SUBSCRIPTION_PUBLIC_VLESS_PORT
 load_optional_env SUBSCRIPTION_NGINX_HTTPS_BACKEND_PORT
 load_optional_env SUBSCRIPTION_NGINX_HTTPS_PUBLIC_PORT
@@ -127,6 +131,8 @@ HYSTERIA2_CERT_FILE="${SUBSCRIPTION_HYSTERIA2_CERT_FILE:-$HYSTERIA2_CERT_FILE}"
 HYSTERIA2_KEY_FILE="${SUBSCRIPTION_HYSTERIA2_KEY_FILE:-$HYSTERIA2_KEY_FILE}"
 HYSTERIA2_MASQUERADE_URL="${SUBSCRIPTION_HYSTERIA2_MASQUERADE_URL:-$HYSTERIA2_MASQUERADE_URL}"
 HYSTERIA2_AUTH="${SUBSCRIPTION_HYSTERIA2_AUTH:-$HYSTERIA2_AUTH}"
+HYSTERIA2_STATS_LISTEN="${SUBSCRIPTION_HYSTERIA2_STATS_LISTEN:-$HYSTERIA2_STATS_LISTEN}"
+HYSTERIA2_STATS_SECRET="${SUBSCRIPTION_HYSTERIA2_STATS_SECRET:-$HYSTERIA2_STATS_SECRET}"
 PUBLIC_VLESS_PORT="${SUBSCRIPTION_PUBLIC_VLESS_PORT:-$PUBLIC_VLESS_PORT}"
 NGINX_HTTPS_BACKEND_PORT="${SUBSCRIPTION_NGINX_HTTPS_BACKEND_PORT:-$NGINX_HTTPS_BACKEND_PORT}"
 NGINX_HTTPS_PUBLIC_PORT="${SUBSCRIPTION_NGINX_HTTPS_PUBLIC_PORT:-$NGINX_HTTPS_PUBLIC_PORT}"
@@ -193,6 +199,8 @@ hysteria2_cert_file="$HYSTERIA2_CERT_FILE"
 hysteria2_key_file="$HYSTERIA2_KEY_FILE"
 hysteria2_masquerade_url="$HYSTERIA2_MASQUERADE_URL"
 hysteria2_auth="$HYSTERIA2_AUTH"
+hysteria2_stats_listen="$HYSTERIA2_STATS_LISTEN"
+hysteria2_stats_secret="$HYSTERIA2_STATS_SECRET"
 public_vless_port="$PUBLIC_VLESS_PORT"
 nginx_https_backend_port="$NGINX_HTTPS_BACKEND_PORT"
 nginx_https_public_port="$NGINX_HTTPS_PUBLIC_PORT"
@@ -233,6 +241,22 @@ PY
     chmod 600 /root/tgvpn-hysteria2-auth.txt
   fi
 fi
+if [[ -z "\$hysteria2_stats_secret" ]]; then
+  if [[ -f /root/tgvpn-hysteria2-stats-secret.txt ]]; then
+    hysteria2_stats_secret="\$(tr -d '\r\n' < /root/tgvpn-hysteria2-stats-secret.txt)"
+  else
+    hysteria2_stats_secret="\$(python3 - <<'PY'
+import secrets
+print(secrets.token_urlsafe(32))
+PY
+)"
+    printf '%s\n' "\$hysteria2_stats_secret" > /root/tgvpn-hysteria2-stats-secret.txt
+    chmod 600 /root/tgvpn-hysteria2-stats-secret.txt
+  fi
+else
+  printf '%s\n' "\$hysteria2_stats_secret" > /root/tgvpn-hysteria2-stats-secret.txt
+  chmod 600 /root/tgvpn-hysteria2-stats-secret.txt
+fi
 
 configure_hysteria2_daemon() {
   local cert_dir="/etc/letsencrypt/live/\$direct_host"
@@ -264,8 +288,14 @@ tls:
   key: /etc/hysteria/certs/s2.privkey.pem
 
 auth:
-  type: password
-  password: "\$hysteria2_auth"
+  type: http
+  http:
+    url: http://127.0.0.1:\$subscription_port/hysteria/auth
+    insecure: false
+
+trafficStats:
+  listen: \$hysteria2_stats_listen
+  secret: "\$hysteria2_stats_secret"
 
 resolver:
   type: udp
@@ -290,6 +320,7 @@ HYSTERIA_CONFIG
   systemctl restart hysteria-server.service
   sleep 1
   systemctl is-active --quiet hysteria-server.service
+  curl -fsS -H "Authorization: \$hysteria2_stats_secret" "http://\$hysteria2_stats_listen/online" >/dev/null
 }
 
 configure_hysteria2_daemon
@@ -452,8 +483,11 @@ HYSTERIA2_PUBLIC_HOST=\$server2_host
 HYSTERIA2_PUBLIC_PORT=\$hysteria2_port
 HYSTERIA2_SNI=\$direct_host
 HYSTERIA2_FP=chrome
-HYSTERIA2_AUTH=\$hysteria2_auth
+HYSTERIA2_AUTH=
 HYSTERIA2_UDP_IDLE_TIMEOUT=60
+HYSTERIA2_STATS_URL=http://\$hysteria2_stats_listen
+HYSTERIA2_STATS_SECRET_FILE=/root/tgvpn-hysteria2-stats-secret.txt
+HYSTERIA2_STATS_TIMEOUT_SECONDS=5
 VLESS_LEGACY_PUBLIC_HOST=
 VLESS_LEGACY_PUBLIC_PORT=8443
 VLESS_LEGACY_SECURITY=reality
@@ -642,8 +676,26 @@ letsencrypt_email="$LETSENCRYPT_EMAIL"
 hysteria2_port="$HYSTERIA2_PORT"
 hysteria2_masquerade_url="$HYSTERIA2_MASQUERADE_URL"
 hysteria2_auth="$HYSTERIA2_AUTH"
+hysteria2_stats_listen="$HYSTERIA2_STATS_LISTEN"
+hysteria2_stats_secret="$HYSTERIA2_STATS_SECRET"
 if [[ -z "\$hysteria2_auth" && -f /root/tgvpn-hysteria2-auth.txt ]]; then
   hysteria2_auth="\$(tr -d '\r\n' < /root/tgvpn-hysteria2-auth.txt)"
+fi
+if [[ -z "\$hysteria2_stats_secret" ]]; then
+  if [[ -f /root/tgvpn-hysteria2-stats-secret.txt ]]; then
+    hysteria2_stats_secret="\$(tr -d '\r\n' < /root/tgvpn-hysteria2-stats-secret.txt)"
+  else
+    hysteria2_stats_secret="\$(python3 - <<'PY'
+import secrets
+print(secrets.token_urlsafe(32))
+PY
+)"
+    printf '%s\n' "\$hysteria2_stats_secret" > /root/tgvpn-hysteria2-stats-secret.txt
+    chmod 600 /root/tgvpn-hysteria2-stats-secret.txt
+  fi
+else
+  printf '%s\n' "\$hysteria2_stats_secret" > /root/tgvpn-hysteria2-stats-secret.txt
+  chmod 600 /root/tgvpn-hysteria2-stats-secret.txt
 fi
 
 apt-get update >/dev/null
@@ -709,8 +761,14 @@ tls:
   key: /etc/hysteria/certs/s2.privkey.pem
 
 auth:
-  type: password
-  password: "\$hysteria2_auth"
+  type: http
+  http:
+    url: http://127.0.0.1:\$subscription_port/hysteria/auth
+    insecure: false
+
+trafficStats:
+  listen: \$hysteria2_stats_listen
+  secret: "\$hysteria2_stats_secret"
 
 resolver:
   type: udp
@@ -734,6 +792,7 @@ HYSTERIA_CONFIG
   systemctl restart hysteria-server.service
   sleep 1
   systemctl is-active --quiet hysteria-server.service
+  curl -fsS -H "Authorization: \$hysteria2_stats_secret" "http://\$hysteria2_stats_listen/online" >/dev/null
 fi
 
 cp "\$server_dir/deploy/nginx/s2.nnqnn.tech.conf" /etc/nginx/sites-available/tgvpn-subscription.conf

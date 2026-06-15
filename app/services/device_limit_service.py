@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.config import Settings
 from app.db.models import User, UserStatus
-from app.services.xray_service import XrayService
+from app.services.xray_service import OnlineDeviceStats, XrayService
 
 logger = logging.getLogger(__name__)
 
@@ -28,25 +28,29 @@ class DeviceLimitService:
         settings: Settings,
         session_maker: async_sessionmaker[AsyncSession],
         xray_service: XrayService,
+        subscription_snapshot_service=None,
     ) -> None:
         self.settings = settings
         self.session_maker = session_maker
         self.xray_service = xray_service
+        self.subscription_snapshot_service = subscription_snapshot_service
 
     async def enforce(self, bot: Bot) -> None:
         if self.settings.max_devices <= 0:
             return
         offending_ids, has_valid_snapshot = await self._collect_offending_telegram_ids()
         if not has_valid_snapshot:
-            logger.warning("Device-limit check skipped: no valid snapshot from Xray API or access log")
+            logger.warning("Device-limit check skipped: no valid combined online-device snapshot")
             return
-        if not offending_ids:
-            await self._recover_unblocked_users(bot, set())
-            return
-        await self._apply_blocks(bot, offending_ids)
-        await self._recover_unblocked_users(bot, offending_ids)
+        blocked_ids = await self._apply_blocks(bot, offending_ids) if offending_ids else set()
+        recovered = await self._recover_unblocked_users(bot, offending_ids)
+        if blocked_ids or recovered:
+            await self._sync_subscription_snapshot()
+        for telegram_id in blocked_ids:
+            await self.xray_service.kick_hysteria_user(telegram_id)
 
-    async def _apply_blocks(self, bot: Bot, offending_ids: set[int]) -> None:
+    async def _apply_blocks(self, bot: Bot, offending_ids: set[int]) -> set[int]:
+        blocked_ids: set[int] = set()
         async with self.session_maker() as session:
             result = await session.execute(
                 select(User).where(User.telegram_id.in_(offending_ids), User.status == UserStatus.active)
@@ -59,6 +63,7 @@ class DeviceLimitService:
                 if user.vpn_enabled:
                     await self.xray_service.disable_user(user.telegram_id)
                     user.vpn_enabled = False
+                blocked_ids.add(int(user.telegram_id))
                 await self._safe_send(
                     bot,
                     user.telegram_id,
@@ -68,9 +73,11 @@ class DeviceLimitService:
                     ),
                 )
             await session.commit()
+        return blocked_ids
 
-    async def _recover_unblocked_users(self, bot: Bot, offending_ids: set[int]) -> None:
+    async def _recover_unblocked_users(self, bot: Bot, offending_ids: set[int]) -> bool:
         now = datetime.now(timezone.utc)
+        changed = False
         async with self.session_maker() as session:
             result = await session.execute(
                 select(User).where(User.device_limit_blocked.is_(True), User.status == UserStatus.active)
@@ -80,6 +87,7 @@ class DeviceLimitService:
                 if user.telegram_id in offending_ids:
                     continue
                 user.device_limit_blocked = False
+                changed = True
                 if user.expiration_date and user.expiration_date > now and not user.vpn_enabled:
                     await self.xray_service.enable_user(user.telegram_id, str(user.uuid))
                     user.vpn_enabled = True
@@ -89,19 +97,16 @@ class DeviceLimitService:
                     "✅ Ограничение по устройствам снято, VPN снова доступен.",
                 )
             await session.commit()
+        return changed
 
     async def _collect_offending_telegram_ids(self) -> tuple[set[int], bool]:
-        if self.settings.xray_api_enabled:
-            api_result = await self._collect_offending_telegram_ids_api()
-            if api_result is not None:
-                return api_result, True
-        log_result = self._collect_offending_telegram_ids_from_logs(
-            self.settings.xray_access_log_path,
-            self.settings.max_devices,
-        )
-        if log_result is None:
+        if not self.settings.xray_api_enabled:
+            logger.warning("Device-limit check skipped: XRAY_API_ENABLED=false")
             return set(), False
-        return log_result, True
+        api_result = await self._collect_offending_telegram_ids_api()
+        if api_result is None:
+            return set(), False
+        return api_result, True
 
     async def _collect_offending_telegram_ids_api(self) -> set[int] | None:
         try:
@@ -114,18 +119,29 @@ class DeviceLimitService:
                 )
                 telegram_ids = [int(tg_id) for (tg_id,) in result.all()]
 
-            offending_ids: set[int] = set()
-            for telegram_id in telegram_ids:
-                ips = await self.xray_service.get_user_online_ips(telegram_id)
-                if ips is None:
-                    logger.warning("Xray API online IP stats unavailable, fallback to access log mode")
-                    return None
-                if len(ips) > self.settings.max_devices:
-                    offending_ids.add(telegram_id)
-            return offending_ids
+            stats_by_id = await self.xray_service.get_users_online_device_stats(telegram_ids)
+            if stats_by_id is None:
+                logger.warning("Combined online-device stats unavailable; enforcement skipped")
+                return None
+            return self._offending_ids_from_device_stats(stats_by_id, self.settings.max_devices)
         except Exception as exc:  # noqa: BLE001
-            logger.warning("Failed to collect IP stats via Xray API: %s", exc)
+            logger.warning("Failed to collect combined online-device stats: %s", exc)
             return None
+
+    async def _sync_subscription_snapshot(self) -> None:
+        if self.subscription_snapshot_service is None:
+            return
+        try:
+            await self.subscription_snapshot_service.sync_once()
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Failed to sync subscription snapshot after device-limit change: %s", exc)
+
+    @staticmethod
+    def _offending_ids_from_device_stats(
+        stats_by_id: dict[int, OnlineDeviceStats],
+        max_devices: int,
+    ) -> set[int]:
+        return {telegram_id for telegram_id, stats in stats_by_id.items() if stats.total > max_devices}
 
     @classmethod
     def _collect_offending_telegram_ids_from_logs(cls, log_path: Path, max_devices: int) -> set[int] | None:

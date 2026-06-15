@@ -102,8 +102,13 @@ async def main() -> None:
     billing_service = BillingService(settings, session_maker, user_service, xray_service)
     payment_service = TelegaPayService(settings, session_maker)
     admin_service = AdminService(xray_service)
-    device_limit_service = DeviceLimitService(settings, session_maker, xray_service)
     subscription_snapshot_service = SubscriptionSnapshotService(settings, session_maker)
+    device_limit_service = DeviceLimitService(
+        settings,
+        session_maker,
+        xray_service,
+        subscription_snapshot_service=subscription_snapshot_service,
+    )
 
     scheduler = SchedulerService(
         settings=settings,
