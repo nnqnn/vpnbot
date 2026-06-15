@@ -32,8 +32,8 @@ def main() -> None:
     parser.add_argument("--xhttp-mode", default="packet-up")
     parser.add_argument("--hysteria2-inbound-tag", default="hysteria2-udp-443")
     parser.add_argument("--hysteria2-port", type=int, default=443)
-    parser.add_argument("--hysteria2-cert-file", default="/etc/letsencrypt/live/s2.nnqnn.tech/fullchain.pem")
-    parser.add_argument("--hysteria2-key-file", default="/etc/letsencrypt/live/s2.nnqnn.tech/privkey.pem")
+    parser.add_argument("--hysteria2-cert-file", default="/usr/local/etc/xray/certs/s2.fullchain.pem")
+    parser.add_argument("--hysteria2-key-file", default="/usr/local/etc/xray/certs/s2.privkey.pem")
     parser.add_argument("--hysteria2-masquerade-url", default="https://www.yandex.ru/")
     parser.add_argument("--server-name", action="append", default=["www.cloudflare.com", "www.yandex.ru", "yandex.ru"])
     parser.add_argument("--short-id", default="a1b2c3d4e5f6a7b8")
@@ -111,8 +111,8 @@ def ensure_xray_api(
     xhttp_mode: str = "packet-up",
     hysteria2_inbound_tag: str = "hysteria2-udp-443",
     hysteria2_port: int = 443,
-    hysteria2_cert_file: str = "/etc/letsencrypt/live/s2.nnqnn.tech/fullchain.pem",
-    hysteria2_key_file: str = "/etc/letsencrypt/live/s2.nnqnn.tech/privkey.pem",
+    hysteria2_cert_file: str = "/usr/local/etc/xray/certs/s2.fullchain.pem",
+    hysteria2_key_file: str = "/usr/local/etc/xray/certs/s2.privkey.pem",
     hysteria2_masquerade_url: str = "https://www.yandex.ru/",
     server_names: list[str] | None = None,
     short_id: str = "a1b2c3d4e5f6a7b8",

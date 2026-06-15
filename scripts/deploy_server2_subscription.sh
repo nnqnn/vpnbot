@@ -19,8 +19,8 @@ XHTTP_PATH="${SUBSCRIPTION_XHTTP_PATH:-/kvpn-xhttp}"
 XHTTP_MODE="${SUBSCRIPTION_XHTTP_MODE:-packet-up}"
 HYSTERIA2_INBOUND_TAG="${SUBSCRIPTION_HYSTERIA2_INBOUND_TAG:-hysteria2-udp-443}"
 HYSTERIA2_PORT="${SUBSCRIPTION_HYSTERIA2_PORT:-443}"
-HYSTERIA2_CERT_FILE="${SUBSCRIPTION_HYSTERIA2_CERT_FILE:-/etc/letsencrypt/live/s2.nnqnn.tech/fullchain.pem}"
-HYSTERIA2_KEY_FILE="${SUBSCRIPTION_HYSTERIA2_KEY_FILE:-/etc/letsencrypt/live/s2.nnqnn.tech/privkey.pem}"
+HYSTERIA2_CERT_FILE="${SUBSCRIPTION_HYSTERIA2_CERT_FILE:-/usr/local/etc/xray/certs/s2.fullchain.pem}"
+HYSTERIA2_KEY_FILE="${SUBSCRIPTION_HYSTERIA2_KEY_FILE:-/usr/local/etc/xray/certs/s2.privkey.pem}"
 HYSTERIA2_MASQUERADE_URL="${SUBSCRIPTION_HYSTERIA2_MASQUERADE_URL:-https://www.yandex.ru/}"
 PUBLIC_VLESS_PORT="${SUBSCRIPTION_PUBLIC_VLESS_PORT:-443}"
 NGINX_HTTPS_BACKEND_PORT="${SUBSCRIPTION_NGINX_HTTPS_BACKEND_PORT:-18443}"
@@ -205,6 +205,17 @@ tar -xzf /tmp/tgvpn-server2-subscription.tar.gz
 
 apt-get update >/dev/null
 DEBIAN_FRONTEND=noninteractive apt-get install -y python3-httpx python3-dotenv curl >/dev/null
+if [[ -f /etc/letsencrypt/live/s2.nnqnn.tech/fullchain.pem && -f /etc/letsencrypt/live/s2.nnqnn.tech/privkey.pem ]]; then
+  xray_user="$(systemctl show -p User --value xray.service 2>/dev/null || true)"
+  xray_group="$(systemctl show -p Group --value xray.service 2>/dev/null || true)"
+  xray_user="${xray_user:-nobody}"
+  xray_group="${xray_group:-nogroup}"
+  mkdir -p /usr/local/etc/xray/certs
+  cp -L /etc/letsencrypt/live/s2.nnqnn.tech/fullchain.pem /usr/local/etc/xray/certs/s2.fullchain.pem
+  cp -L /etc/letsencrypt/live/s2.nnqnn.tech/privkey.pem /usr/local/etc/xray/certs/s2.privkey.pem
+  chown "$xray_user:$xray_group" /usr/local/etc/xray/certs/s2.fullchain.pem /usr/local/etc/xray/certs/s2.privkey.pem
+  chmod 640 /usr/local/etc/xray/certs/s2.fullchain.pem /usr/local/etc/xray/certs/s2.privkey.pem
+fi
 printf 'tcp_bbr\n' > /etc/modules-load.d/tgvpn-bbr.conf
 modprobe tcp_bbr 2>/dev/null || true
 cat > /etc/sysctl.d/99-tgvpn-network.conf <<SYSCTL
