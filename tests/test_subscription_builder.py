@@ -190,7 +190,7 @@ def test_xray_json_response_uses_worker_profile_for_whitelist_only_user() -> Non
     assert response.headers["support-url"] == "https://t.me/support"
     assert response.headers["subscription-userinfo"].endswith("expire=0")
     assert [outbound["tag"] for outbound in config["outbounds"]] == ["auto-001", "direct", "block"]
-    assert config["remarks"] == "kVPN @kkVPNrobot - Обход белых списков"
+    assert config["remarks"] == "Обход белых списков"
     assert "vless://wl-1" not in response.body
 
 
@@ -231,11 +231,11 @@ def test_xray_json_response_separates_main_and_whitelist_profiles_for_full_acces
     assert isinstance(configs, list)
     assert len(configs) == 2
     main_config, whitelist_config = configs
-    assert main_config["remarks"] == "kVPN @kkVPNrobot - Основной VPN"
+    assert main_config["remarks"] == "Основной #1 🇳🇱"
     assert main_config["outbounds"][0]["tag"] == "proxy"
     assert main_config["outbounds"][0]["settings"]["vnext"][0]["address"] == "89.125.50.96"
     assert main_config["outbounds"][0]["streamSettings"]["realitySettings"]["serverName"] == "www.yandex.ru"
-    assert whitelist_config["remarks"] == "kVPN @kkVPNrobot - Обход белых списков"
+    assert whitelist_config["remarks"] == "Обход белых списков"
     assert whitelist_config["outbounds"][0]["tag"] == "auto-001"
     assert whitelist_config["routing"]["balancers"][0]["selector"] == ["auto-"]
     assert response.headers["subscription-userinfo"].endswith("expire=1781259930")
@@ -472,11 +472,11 @@ def test_xray_json_response_adds_separate_main_fallback_profiles_with_whitelist(
     assert response is not None
     configs = json.loads(response.body)
     assert [config["remarks"] for config in configs] == [
-        "kVPN @kkVPNrobot - Основной VPN",
-        "kVPN @kkVPNrobot - Основной VPN Reality no-flow",
-        "kVPN @kkVPNrobot - Основной VPN XHTTP",
-        "kVPN @kkVPNrobot - Основной VPN Hysteria2",
-        "kVPN @kkVPNrobot - Обход белых списков",
+        "Основной #1 🇳🇱",
+        "Основной #2 🇳🇱",
+        "Основной #3 🇳🇱",
+        "Основной #4 🇳🇱",
+        "Обход белых списков",
     ]
     noflow = configs[1]["outbounds"][0]
     assert noflow["settings"]["vnext"][0]["port"] == 8443

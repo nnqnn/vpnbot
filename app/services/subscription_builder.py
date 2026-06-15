@@ -474,7 +474,7 @@ def _build_main_profile_configs(
         configs.append(
             _build_single_outbound_main_config(
                 profile,
-                remarks=f"{profile.profile_title} - Основной VPN Reality no-flow",
+                remarks="Основной #2 🇳🇱",
                 outbound=noflow_outbound,
                 server_host=profile.noflow_vless_public_host,
             )
@@ -485,7 +485,7 @@ def _build_main_profile_configs(
         configs.append(
             _build_single_outbound_main_config(
                 profile,
-                remarks=f"{profile.profile_title} - Основной VPN XHTTP",
+                remarks="Основной #3 🇳🇱",
                 outbound=xhttp_outbound,
                 server_host=profile.xhttp_vless_public_host,
             )
@@ -496,7 +496,7 @@ def _build_main_profile_configs(
         configs.append(
             _build_single_outbound_main_config(
                 profile,
-                remarks=f"{profile.profile_title} - Основной VPN Hysteria2",
+                remarks="Основной #4 🇳🇱",
                 outbound=hysteria2_outbound,
                 server_host=profile.hysteria2_public_host,
             )
@@ -689,7 +689,7 @@ def _build_single_main_config(
     bridge_profile: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     config = _build_base_client_config(profile)
-    config["remarks"] = f"{profile.profile_title} - Основной VPN"
+    config["remarks"] = "Основной #1 🇳🇱"
     primary_outbound = build_main_xray_outbound(user, profile, tag="proxy")
     fallback_outbound = build_fallback_xray_outbound(user, profile, tag="proxy-direct")
     legacy_outbound = build_legacy_xray_outbound(user, profile, tag="proxy-legacy")
@@ -816,7 +816,7 @@ def build_debug_direct_tcp_profile(user: SnapshotUser, profile: SubscriptionProf
 
 def _normalize_whitelist_profile(whitelist_profile: dict[str, Any], profile: SubscriptionProfile) -> dict[str, Any]:
     config = deepcopy(whitelist_profile)
-    config["remarks"] = f"{profile.profile_title} - Обход белых списков"
+    config["remarks"] = "Обход белых списков"
     config.setdefault("log", {"loglevel": "warning"})
     config.setdefault("outbounds", [])
     if not isinstance(config["outbounds"], list):

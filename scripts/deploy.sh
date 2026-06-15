@@ -358,7 +358,7 @@ from pathlib import Path
 configs = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
 if not isinstance(configs, list):
     raise SystemExit("subscription body is not a profile list")
-main = next((item for item in configs if isinstance(item, dict) and item.get("remarks", "").endswith("Основной VPN")), None)
+main = next((item for item in configs if isinstance(item, dict) and item.get("remarks") == "Основной #1 🇳🇱"), None)
 if main is None:
     raise SystemExit("main VPN profile was not found")
 outbounds = main.get("outbounds")
@@ -385,14 +385,14 @@ if reality.get("serverName") != "www.yandex.ru":
 if not users or users[0].get("flow") != "xtls-rprx-vision":
     raise SystemExit("main user flow is not xtls-rprx-vision")
 remarks = {str(item.get("remarks")) for item in configs if isinstance(item, dict)}
-required_suffixes = {
-    "Основной VPN Reality no-flow",
-    "Основной VPN XHTTP",
-    "Основной VPN Hysteria2",
+required_remarks = {
+    "Основной #2 🇳🇱",
+    "Основной #3 🇳🇱",
+    "Основной #4 🇳🇱",
 }
-for suffix in required_suffixes:
-    if not any(remark.endswith(suffix) for remark in remarks):
-        raise SystemExit(f"missing subscription profile: {suffix}")
+for remark in required_remarks:
+    if remark not in remarks:
+        raise SystemExit(f"missing subscription profile: {remark}")
 PY
 then
   rm -f "$subscription_body"
