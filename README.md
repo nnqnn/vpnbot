@@ -439,7 +439,7 @@ Server #1 Xray/Apache не нужны для новой подписки и не
 ```bash
 XRAY_CONTROL_MODE=ssh_api
 XRAY_INBOUND_TAG=direct-reality-8443
-XRAY_EXTRA_INBOUND_TAGS=upstream-in,cdn-ws-in,xhttp-in,direct-reality-noflow-8443,hysteria2-udp-443
+XRAY_EXTRA_INBOUND_TAGS=upstream-in,cdn-ws-in,xhttp-in,direct-reality-noflow-8443
 XRAY_FLOW_INBOUND_TAGS=direct-reality-8443,upstream-in
 XRAY_CONFIG_PATH=/usr/local/etc/xray/config.json
 XRAY_API_ENABLED=true
@@ -483,6 +483,7 @@ VLESS_XHTTP_PATH=/kvpn-xhttp
 HYSTERIA2_PUBLIC_HOST=89.125.50.96
 HYSTERIA2_PUBLIC_PORT=443
 HYSTERIA2_SNI=s2.nnqnn.tech
+HYSTERIA2_AUTH=SERVER2_HYSTERIA2_SHARED_AUTH
 
 SUBSCRIPTION_PUBLIC_BASE_URL=https://s2.nnqnn.tech:8444
 SUBSCRIPTION_LINKS_ENABLED=true
@@ -506,6 +507,8 @@ SUBSCRIPTION_ENABLE_CLOUDFLARED=false
 
 `SUBSCRIPTION_LINKS_ENABLED=true` включает выдачу Happ-ссылок через `s2.nnqnn.tech`.
 Активный пользователь получает в одной Happ-подписке несколько отдельных элементов основного VPN: Reality Vision `89.125.50.96:443/tcp`, Reality no-flow `89.125.50.96:8443/tcp`, XHTTP/TLS `s2.nnqnn.tech:8444/kvpn-xhttp` и Hysteria2 `89.125.50.96:443/udp`. Если куплен обход белых списков, профиль worker-а `vpn.nnqnn.tech` добавляется пятым отдельным элементом в тот же JSON-список. На server #2 публичный TCP `443` слушает Xray напрямую; Nginx stream на `443` не используется. HTTPS-подписка доступна отдельно на `s2.nnqnn.tech:8444`. Reality `upstream-in:9443` остается включенным для старой цепочки `server #1 -> server #2`.
+
+VLESS-пользователи синхронизируются через Xray API per-user. Hysteria2 в этой схеме использует отдельный shared auth из `/root/tgvpn-hysteria2-auth.txt` на server #2 и выдается только внутри персональной подписки активным пользователям.
 
 На server #2:
 

@@ -450,6 +450,7 @@ def test_xray_json_response_adds_separate_main_fallback_profiles_with_whitelist(
         hysteria2_public_host="89.125.50.96",
         hysteria2_public_port=443,
         hysteria2_sni="s2.nnqnn.tech",
+        hysteria2_auth="SHARED_HY2_AUTH",
     )
     worker_profile = {
         "outbounds": [
@@ -490,7 +491,7 @@ def test_xray_json_response_adds_separate_main_fallback_profiles_with_whitelist(
     assert hysteria["protocol"] == "hysteria"
     assert hysteria["settings"] == {"version": 2, "address": "89.125.50.96", "port": 443}
     assert hysteria["streamSettings"]["network"] == "hysteria"
-    assert hysteria["streamSettings"]["hysteriaSettings"]["auth"] == "00000000-0000-0000-0000-000000000001"
+    assert hysteria["streamSettings"]["hysteriaSettings"]["auth"] == "SHARED_HY2_AUTH"
     assert configs[4]["outbounds"][0]["tag"] == "auto-001"
 
 
@@ -833,7 +834,7 @@ def test_xray_service_uses_flow_only_for_reality_inbound_tags() -> None:
     service = XrayService(
         SimpleNamespace(
             xray_inbound_tag="direct-reality-8443",
-            xray_extra_inbound_tags="upstream-in,cdn-ws-in,xhttp-in,direct-reality-noflow-8443,hysteria2-udp-443",
+            xray_extra_inbound_tags="upstream-in,cdn-ws-in,xhttp-in,direct-reality-noflow-8443",
             xray_flow_inbound_tags="direct-reality-8443,upstream-in",
             vless_flow="xtls-rprx-vision",
         )
@@ -845,14 +846,12 @@ def test_xray_service_uses_flow_only_for_reality_inbound_tags() -> None:
         "cdn-ws-in",
         "xhttp-in",
         "direct-reality-noflow-8443",
-        "hysteria2-udp-443",
     ]
     assert service._flow_for_inbound_tag("direct-reality-8443") == "xtls-rprx-vision"
     assert service._flow_for_inbound_tag("upstream-in") == "xtls-rprx-vision"
     assert service._flow_for_inbound_tag("cdn-ws-in") == ""
     assert service._flow_for_inbound_tag("xhttp-in") == ""
     assert service._flow_for_inbound_tag("direct-reality-noflow-8443") == ""
-    assert service._flow_for_inbound_tag("hysteria2-udp-443") == ""
 
 
 def test_remote_xray_config_sync_preserves_old_chain_and_removes_stale_users() -> None:
@@ -965,9 +964,10 @@ def test_server2_xray_api_config_preserves_old_chain_client() -> None:
     assert hysteria["listen"] == "0.0.0.0"
     assert hysteria["port"] == 443
     assert hysteria["protocol"] == "hysteria"
-    assert hysteria["settings"] == {"version": 2, "users": []}
+    assert hysteria["settings"] == {"version": 2}
     assert hysteria["streamSettings"]["network"] == "hysteria"
     assert hysteria["streamSettings"]["security"] == "tls"
+    assert hysteria["streamSettings"]["hysteriaSettings"]["auth"] == ""
     assert any(inbound["tag"] == "api" for inbound in config["inbounds"])
     assert config["routing"]["rules"][0] == {"type": "field", "inboundTag": ["api"], "outboundTag": "api"}
     assert {

@@ -102,6 +102,7 @@ class RuntimeConfig:
             hysteria2_public_port=int(_env("HYSTERIA2_PUBLIC_PORT", "443")),
             hysteria2_sni=_env("HYSTERIA2_SNI", "s2.nnqnn.tech"),
             hysteria2_fp=_env("HYSTERIA2_FP", "chrome"),
+            hysteria2_auth=_env("HYSTERIA2_AUTH", ""),
             hysteria2_udp_idle_timeout=int(_env("HYSTERIA2_UDP_IDLE_TIMEOUT", "60")),
             legacy_vless_public_host=_env("VLESS_LEGACY_PUBLIC_HOST", ""),
             legacy_vless_public_port=int(_env("VLESS_LEGACY_PUBLIC_PORT", "8443")),

@@ -69,6 +69,7 @@ class SubscriptionProfile:
     hysteria2_public_port: int = 443
     hysteria2_sni: str = "s2.nnqnn.tech"
     hysteria2_fp: str = "chrome"
+    hysteria2_auth: str = ""
     hysteria2_udp_idle_timeout: int = 60
     legacy_vless_public_host: str = ""
     legacy_vless_public_port: int = 8443
@@ -416,7 +417,7 @@ def build_hysteria2_xray_outbound(
     *,
     tag: str = "proxy",
 ) -> dict[str, Any] | None:
-    if not profile.hysteria2_public_host:
+    if not profile.hysteria2_public_host or not profile.hysteria2_auth:
         return None
     host = profile.hysteria2_public_host
     return {
@@ -436,7 +437,7 @@ def build_hysteria2_xray_outbound(
             },
             "hysteriaSettings": {
                 "version": 2,
-                "auth": user.uuid,
+                "auth": profile.hysteria2_auth,
                 "udpIdleTimeout": profile.hysteria2_udp_idle_timeout,
             },
         },

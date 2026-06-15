@@ -22,6 +22,7 @@ HYSTERIA2_PORT="${SUBSCRIPTION_HYSTERIA2_PORT:-443}"
 HYSTERIA2_CERT_FILE="${SUBSCRIPTION_HYSTERIA2_CERT_FILE:-/usr/local/etc/xray/certs/s2.fullchain.pem}"
 HYSTERIA2_KEY_FILE="${SUBSCRIPTION_HYSTERIA2_KEY_FILE:-/usr/local/etc/xray/certs/s2.privkey.pem}"
 HYSTERIA2_MASQUERADE_URL="${SUBSCRIPTION_HYSTERIA2_MASQUERADE_URL:-https://www.yandex.ru/}"
+HYSTERIA2_AUTH="${SUBSCRIPTION_HYSTERIA2_AUTH:-}"
 PUBLIC_VLESS_PORT="${SUBSCRIPTION_PUBLIC_VLESS_PORT:-443}"
 NGINX_HTTPS_BACKEND_PORT="${SUBSCRIPTION_NGINX_HTTPS_BACKEND_PORT:-18443}"
 NGINX_HTTPS_PUBLIC_PORT="${SUBSCRIPTION_NGINX_HTTPS_PUBLIC_PORT:-8444}"
@@ -102,6 +103,7 @@ load_optional_env SUBSCRIPTION_HYSTERIA2_PORT
 load_optional_env SUBSCRIPTION_HYSTERIA2_CERT_FILE
 load_optional_env SUBSCRIPTION_HYSTERIA2_KEY_FILE
 load_optional_env SUBSCRIPTION_HYSTERIA2_MASQUERADE_URL
+load_optional_env SUBSCRIPTION_HYSTERIA2_AUTH
 load_optional_env SUBSCRIPTION_PUBLIC_VLESS_PORT
 load_optional_env SUBSCRIPTION_NGINX_HTTPS_BACKEND_PORT
 load_optional_env SUBSCRIPTION_NGINX_HTTPS_PUBLIC_PORT
@@ -124,6 +126,7 @@ HYSTERIA2_PORT="${SUBSCRIPTION_HYSTERIA2_PORT:-$HYSTERIA2_PORT}"
 HYSTERIA2_CERT_FILE="${SUBSCRIPTION_HYSTERIA2_CERT_FILE:-$HYSTERIA2_CERT_FILE}"
 HYSTERIA2_KEY_FILE="${SUBSCRIPTION_HYSTERIA2_KEY_FILE:-$HYSTERIA2_KEY_FILE}"
 HYSTERIA2_MASQUERADE_URL="${SUBSCRIPTION_HYSTERIA2_MASQUERADE_URL:-$HYSTERIA2_MASQUERADE_URL}"
+HYSTERIA2_AUTH="${SUBSCRIPTION_HYSTERIA2_AUTH:-$HYSTERIA2_AUTH}"
 PUBLIC_VLESS_PORT="${SUBSCRIPTION_PUBLIC_VLESS_PORT:-$PUBLIC_VLESS_PORT}"
 NGINX_HTTPS_BACKEND_PORT="${SUBSCRIPTION_NGINX_HTTPS_BACKEND_PORT:-$NGINX_HTTPS_BACKEND_PORT}"
 NGINX_HTTPS_PUBLIC_PORT="${SUBSCRIPTION_NGINX_HTTPS_PUBLIC_PORT:-$NGINX_HTTPS_PUBLIC_PORT}"
@@ -189,6 +192,7 @@ hysteria2_port="$HYSTERIA2_PORT"
 hysteria2_cert_file="$HYSTERIA2_CERT_FILE"
 hysteria2_key_file="$HYSTERIA2_KEY_FILE"
 hysteria2_masquerade_url="$HYSTERIA2_MASQUERADE_URL"
+hysteria2_auth="$HYSTERIA2_AUTH"
 public_vless_port="$PUBLIC_VLESS_PORT"
 nginx_https_backend_port="$NGINX_HTTPS_BACKEND_PORT"
 nginx_https_public_port="$NGINX_HTTPS_PUBLIC_PORT"
@@ -215,6 +219,19 @@ if [[ -f /etc/letsencrypt/live/s2.nnqnn.tech/fullchain.pem && -f /etc/letsencryp
   cp -L /etc/letsencrypt/live/s2.nnqnn.tech/privkey.pem /usr/local/etc/xray/certs/s2.privkey.pem
   chown "\$xray_user:\$xray_group" /usr/local/etc/xray/certs/s2.fullchain.pem /usr/local/etc/xray/certs/s2.privkey.pem
   chmod 640 /usr/local/etc/xray/certs/s2.fullchain.pem /usr/local/etc/xray/certs/s2.privkey.pem
+fi
+if [[ -z "\$hysteria2_auth" ]]; then
+  if [[ -f /root/tgvpn-hysteria2-auth.txt ]]; then
+    hysteria2_auth="\$(tr -d '\r\n' < /root/tgvpn-hysteria2-auth.txt)"
+  else
+    hysteria2_auth="\$(python3 - <<'PY'
+import secrets
+print(secrets.token_urlsafe(32))
+PY
+)"
+    printf '%s\n' "\$hysteria2_auth" > /root/tgvpn-hysteria2-auth.txt
+    chmod 600 /root/tgvpn-hysteria2-auth.txt
+  fi
 fi
 printf 'tcp_bbr\n' > /etc/modules-load.d/tgvpn-bbr.conf
 modprobe tcp_bbr 2>/dev/null || true
@@ -269,6 +286,7 @@ python3 "\$server_dir/scripts/configure_server2_xray_api.py" \
 	  --hysteria2-cert-file "\$hysteria2_cert_file" \
 	  --hysteria2-key-file "\$hysteria2_key_file" \
 	  --hysteria2-masquerade-url "\$hysteria2_masquerade_url" \
+	  --hysteria2-auth "\$hysteria2_auth" \
   --server-name www.cloudflare.com \
   --server-name www.yandex.ru \
   --server-name yandex.ru \
@@ -379,6 +397,7 @@ HYSTERIA2_PUBLIC_HOST=\$server2_host
 HYSTERIA2_PUBLIC_PORT=\$hysteria2_port
 HYSTERIA2_SNI=\$direct_host
 HYSTERIA2_FP=chrome
+HYSTERIA2_AUTH=\$hysteria2_auth
 HYSTERIA2_UDP_IDLE_TIMEOUT=60
 VLESS_LEGACY_PUBLIC_HOST=
 VLESS_LEGACY_PUBLIC_PORT=8443
@@ -491,7 +510,7 @@ payload = {
     "command_timeout_seconds": 120,
     "xray_config_path": "/usr/local/etc/xray/config.json",
     "xray_inbound_tag": "direct-reality-8443",
-    "xray_extra_inbound_tags": ["upstream-in", "cdn-ws-in", "xhttp-in", "direct-reality-noflow-8443", "hysteria2-udp-443"],
+    "xray_extra_inbound_tags": ["upstream-in", "cdn-ws-in", "xhttp-in", "direct-reality-noflow-8443"],
     "xray_flow_inbound_tags": ["direct-reality-8443", "upstream-in"],
     "persist_users_in_config": False,
     "vless_flow": "xtls-rprx-vision",
@@ -514,7 +533,6 @@ PY
 	xray api inboundusercount --server=127.0.0.1:10085 --timeout=5 -tag=cdn-ws-in --json >/dev/null
 	xray api inboundusercount --server=127.0.0.1:10085 --timeout=5 -tag=xhttp-in --json >/dev/null
 	xray api inboundusercount --server=127.0.0.1:10085 --timeout=5 -tag=direct-reality-noflow-8443 --json >/dev/null
-	xray api inboundusercount --server=127.0.0.1:10085 --timeout=5 -tag=hysteria2-udp-443 --json >/dev/null
 	if [[ "\$enable_cloudflared" == "true" ]]; then
 	  if ! command -v cloudflared >/dev/null 2>&1; then
 	    curl -fsSL -o /tmp/cloudflared-linux-amd64.deb \

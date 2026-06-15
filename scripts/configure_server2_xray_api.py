@@ -35,6 +35,7 @@ def main() -> None:
     parser.add_argument("--hysteria2-cert-file", default="/usr/local/etc/xray/certs/s2.fullchain.pem")
     parser.add_argument("--hysteria2-key-file", default="/usr/local/etc/xray/certs/s2.privkey.pem")
     parser.add_argument("--hysteria2-masquerade-url", default="https://www.yandex.ru/")
+    parser.add_argument("--hysteria2-auth", default="")
     parser.add_argument("--server-name", action="append", default=["www.cloudflare.com", "www.yandex.ru", "yandex.ru"])
     parser.add_argument("--short-id", default="a1b2c3d4e5f6a7b8")
     parser.add_argument("--flow", default="xtls-rprx-vision")
@@ -68,6 +69,7 @@ def main() -> None:
         hysteria2_cert_file=args.hysteria2_cert_file,
         hysteria2_key_file=args.hysteria2_key_file,
         hysteria2_masquerade_url=args.hysteria2_masquerade_url,
+        hysteria2_auth=args.hysteria2_auth,
         server_names=args.server_name,
         short_id=args.short_id,
         flow=args.flow,
@@ -114,6 +116,7 @@ def ensure_xray_api(
     hysteria2_cert_file: str = "/usr/local/etc/xray/certs/s2.fullchain.pem",
     hysteria2_key_file: str = "/usr/local/etc/xray/certs/s2.privkey.pem",
     hysteria2_masquerade_url: str = "https://www.yandex.ru/",
+    hysteria2_auth: str = "",
     server_names: list[str] | None = None,
     short_id: str = "a1b2c3d4e5f6a7b8",
     flow: str = "xtls-rprx-vision",
@@ -175,6 +178,7 @@ def ensure_xray_api(
         cert_file=hysteria2_cert_file,
         key_file=hysteria2_key_file,
         masquerade_url=hysteria2_masquerade_url,
+        auth=hysteria2_auth,
     ) or changed
 
     api = data.setdefault("api", {})
@@ -453,6 +457,7 @@ def ensure_hysteria2_inbound(
     cert_file: str,
     key_file: str,
     masquerade_url: str,
+    auth: str,
 ) -> bool:
     changed = False
     inbounds = data.setdefault("inbounds", [])
@@ -464,14 +469,15 @@ def ensure_hysteria2_inbound(
         "protocol": "hysteria",
         "settings": {
             "version": 2,
-            "users": [],
         },
         "streamSettings": {
             "network": "hysteria",
             "security": "tls",
             "tlsSettings": {
+                "alpn": ["h3"],
                 "certificates": [
                     {
+                        "usage": "encipherment",
                         "certificateFile": cert_file,
                         "keyFile": key_file,
                     }
@@ -479,6 +485,7 @@ def ensure_hysteria2_inbound(
             },
             "hysteriaSettings": {
                 "version": 2,
+                "auth": auth,
                 "udpIdleTimeout": 60,
                 "masquerade": {
                     "type": "proxy",
@@ -502,12 +509,11 @@ def ensure_hysteria2_inbound(
     if settings.get("version") != 2:
         settings["version"] = 2
         changed = True
-    users = settings.setdefault("users", [])
-    if not isinstance(users, list):
-        settings["users"] = []
-        changed = True
     if "clients" in settings:
         settings.pop("clients", None)
+        changed = True
+    if "users" in settings:
+        settings.pop("users", None)
         changed = True
 
     stream = inbound.setdefault("streamSettings", {})

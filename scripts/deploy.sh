@@ -189,8 +189,7 @@ ensure_csv_env_contains() {
 }
 
 upsert_env_value XRAY_INBOUND_TAG direct-reality-8443
-ensure_csv_env_contains XRAY_EXTRA_INBOUND_TAGS upstream-in cdn-ws-in xhttp-in
-ensure_csv_env_contains XRAY_EXTRA_INBOUND_TAGS direct-reality-noflow-8443 hysteria2-udp-443
+upsert_env_value XRAY_EXTRA_INBOUND_TAGS upstream-in,cdn-ws-in,xhttp-in,direct-reality-noflow-8443
 upsert_env_value XRAY_FLOW_INBOUND_TAGS direct-reality-8443,upstream-in
 upsert_env_value VLESS_PUBLIC_HOST 89.125.50.96
 upsert_env_value VLESS_PUBLIC_PORT 443
