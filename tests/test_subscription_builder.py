@@ -782,7 +782,7 @@ def test_bot_raw_vless_access_text_keeps_legacy_key_format() -> None:
 
     assert f"<code>{link}</code>" in text
     assert '<a href="https://happ.su">' not in text
-    assert "https://t.me/kvpn_public/2" in text
+    assert "https://t.me/kvpnpublic/2" in text
     assert "Ваш VPN-ключ" in text
 
 

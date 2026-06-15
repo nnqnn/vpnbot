@@ -113,7 +113,7 @@ def _build_vpn_access_text(
         "Ручной импорт, если Happ не открылся (копируете ссылку, вставляете в Happ):\n"
         f"{escape(https_link)}\n\n"
         "Подписка обновляется автоматически.\n"
-        "Доп. инструкция: https://t.me/kvpn_public/2\n\n"
+        "Доп. инструкция: https://t.me/kvpnpublic/2\n\n"
         f"Техническая поддержка, если необходима помощь: {settings.support_url}"
     )
 
@@ -131,7 +131,7 @@ def _build_raw_vless_access_text(*, settings: Settings, link: str) -> str:
         "Ваш VPN-ключ:\n"
         f"<code>{escape(link)}</code>\n\n"
         "Если вы используете другое приложение, можно подключиться этим же ключом.\n\n"
-        "Доп. инструкция: https://t.me/kvpn_public/2\n\n"
+        "Доп. инструкция: https://t.me/kvpnpublic/2\n\n"
         f"Техническая поддержка, если необходима помощь: {settings.support_url}"
     )
 
