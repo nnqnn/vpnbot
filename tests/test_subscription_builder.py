@@ -230,14 +230,14 @@ def test_xray_json_response_separates_main_and_whitelist_profiles_for_full_acces
     configs = json.loads(response.body)
     assert isinstance(configs, list)
     assert len(configs) == 2
-    main_config, whitelist_config = configs
+    whitelist_config, main_config = configs
+    assert whitelist_config["remarks"] == "Обход белых списков"
+    assert whitelist_config["outbounds"][0]["tag"] == "auto-001"
+    assert whitelist_config["routing"]["balancers"][0]["selector"] == ["auto-"]
     assert main_config["remarks"] == "Запасной #3 🇳🇱"
     assert main_config["outbounds"][0]["tag"] == "proxy"
     assert main_config["outbounds"][0]["settings"]["vnext"][0]["address"] == "89.125.50.96"
     assert main_config["outbounds"][0]["streamSettings"]["realitySettings"]["serverName"] == "www.yandex.ru"
-    assert whitelist_config["remarks"] == "Обход белых списков"
-    assert whitelist_config["outbounds"][0]["tag"] == "auto-001"
-    assert whitelist_config["routing"]["balancers"][0]["selector"] == ["auto-"]
     assert response.headers["subscription-userinfo"].endswith("expire=1781259930")
 
 
@@ -472,27 +472,27 @@ def test_xray_json_response_adds_separate_main_fallback_profiles_with_whitelist(
     assert response is not None
     configs = json.loads(response.body)
     assert [config["remarks"] for config in configs] == [
-        "Запасной #3 🇳🇱",
+        "Обход белых списков",
+        "Основной #1 🇳🇱",
         "Запасной #1 🇳🇱",
         "Запасной #2 🇳🇱",
-        "Основной #1 🇳🇱",
-        "Обход белых списков",
+        "Запасной #3 🇳🇱",
     ]
-    noflow = configs[1]["outbounds"][0]
-    assert noflow["settings"]["vnext"][0]["port"] == 8443
-    assert "flow" not in noflow["settings"]["vnext"][0]["users"][0]
-    assert noflow["streamSettings"]["security"] == "reality"
-    xhttp = configs[2]["outbounds"][0]
-    assert xhttp["settings"]["vnext"][0]["address"] == "s2.nnqnn.tech"
-    assert xhttp["settings"]["vnext"][0]["port"] == 8444
-    assert xhttp["streamSettings"]["network"] == "xhttp"
-    assert xhttp["streamSettings"]["security"] == "tls"
-    hysteria = configs[3]["outbounds"][0]
+    assert configs[0]["outbounds"][0]["tag"] == "auto-001"
+    hysteria = configs[1]["outbounds"][0]
     assert hysteria["protocol"] == "hysteria"
     assert hysteria["settings"] == {"version": 2, "address": "89.125.50.96", "port": 443}
     assert hysteria["streamSettings"]["network"] == "hysteria"
     assert hysteria["streamSettings"]["hysteriaSettings"]["auth"] == "SHARED_HY2_AUTH"
-    assert configs[4]["outbounds"][0]["tag"] == "auto-001"
+    noflow = configs[2]["outbounds"][0]
+    assert noflow["settings"]["vnext"][0]["port"] == 8443
+    assert "flow" not in noflow["settings"]["vnext"][0]["users"][0]
+    assert noflow["streamSettings"]["security"] == "reality"
+    xhttp = configs[3]["outbounds"][0]
+    assert xhttp["settings"]["vnext"][0]["address"] == "s2.nnqnn.tech"
+    assert xhttp["settings"]["vnext"][0]["port"] == 8444
+    assert xhttp["streamSettings"]["network"] == "xhttp"
+    assert xhttp["streamSettings"]["security"] == "tls"
 
 
 def test_xray_json_main_profile_can_use_xhttp_tls_as_primary() -> None:

@@ -243,10 +243,10 @@ def build_xray_json_profiles(
     whitelist_profile: dict[str, Any] | None = None,
 ) -> list[dict[str, Any]]:
     configs: list[dict[str, Any]] = []
-    if user.main_vpn_active:
-        configs.extend(_build_main_profile_configs(user, profile, bridge_profile=whitelist_profile))
     if user.whitelist_enabled and isinstance(whitelist_profile, dict):
         configs.append(_normalize_whitelist_profile(whitelist_profile, profile))
+    if user.main_vpn_active:
+        configs.extend(_build_main_profile_configs(user, profile, bridge_profile=whitelist_profile))
     return configs
 
 
@@ -467,7 +467,18 @@ def _build_main_profile_configs(
     *,
     bridge_profile: dict[str, Any] | None = None,
 ) -> list[dict[str, Any]]:
-    configs = [_build_single_main_config(user, profile, bridge_profile=bridge_profile)]
+    configs: list[dict[str, Any]] = []
+
+    hysteria2_outbound = build_hysteria2_xray_outbound(user, profile)
+    if hysteria2_outbound is not None:
+        configs.append(
+            _build_single_outbound_main_config(
+                profile,
+                remarks="Основной #1 🇳🇱",
+                outbound=hysteria2_outbound,
+                server_host=profile.hysteria2_public_host,
+            )
+        )
 
     noflow_outbound = build_noflow_xray_outbound(user, profile)
     if noflow_outbound is not None:
@@ -491,16 +502,7 @@ def _build_main_profile_configs(
             )
         )
 
-    hysteria2_outbound = build_hysteria2_xray_outbound(user, profile)
-    if hysteria2_outbound is not None:
-        configs.append(
-            _build_single_outbound_main_config(
-                profile,
-                remarks="Основной #1 🇳🇱",
-                outbound=hysteria2_outbound,
-                server_host=profile.hysteria2_public_host,
-            )
-        )
+    configs.append(_build_single_main_config(user, profile, bridge_profile=bridge_profile))
 
     return configs
 
