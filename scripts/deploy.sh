@@ -290,7 +290,6 @@ fi
 ".venv/bin/python" -m compileall -q app scripts tests
 
 log "Restarting ${service}"
-restart_started_at="$(date '+%Y-%m-%d %H:%M:%S')"
 if ! systemctl restart "$service"; then
   rollback "Failed to restart ${service}."
   exit 1
@@ -303,8 +302,14 @@ if ! systemctl is-active --quiet "$service"; then
 fi
 
 polling_ready=false
-for _ in $(seq 1 45); do
-  if journalctl -u "$service" --since "$restart_started_at" --no-pager | grep -q "Bot is starting polling"; then
+service_main_pid="$(systemctl show -p MainPID --value "$service" || true)"
+for _ in $(seq 1 60); do
+  current_main_pid="$(systemctl show -p MainPID --value "$service" || true)"
+  if [[ -n "$current_main_pid" && "$current_main_pid" != "0" ]]; then
+    service_main_pid="$current_main_pid"
+  fi
+  if [[ -n "$service_main_pid" && "$service_main_pid" != "0" ]] \
+    && journalctl -u "$service" _PID="$service_main_pid" -n 200 --no-pager | grep -q "Bot is starting polling"; then
     polling_ready=true
     break
   fi
