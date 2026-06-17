@@ -129,6 +129,7 @@ log() {
 }
 
 cd "$server_dir"
+rm -f .device_limit_unblock_v2_done
 
 upsert_env_value() {
   local key="$1"
@@ -296,7 +297,8 @@ fi
 ".venv/bin/python" -m pip install -r requirements.txt
 ".venv/bin/python" -m compileall -q app scripts tests
 
-device_limit_unblock_marker=".device_limit_unblock_v2_done"
+mkdir -p /var/lib/tgvpn
+device_limit_unblock_marker="/var/lib/tgvpn/device_limit_unblock_v2_done"
 if [[ ! -f "$device_limit_unblock_marker" ]]; then
   log "Clearing old device-limit blocks once"
   ".venv/bin/python" scripts/unblock_device_limit_users.py
