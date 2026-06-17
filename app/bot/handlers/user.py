@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import asyncio
 from html import escape
 from decimal import Decimal
 
@@ -44,7 +45,13 @@ async def _get_user(session: AsyncSession, telegram_id: int):
 
 async def _is_subscribed(bot: Bot, settings: Settings, telegram_id: int) -> bool:
     try:
-        member = await bot.get_chat_member(settings.required_channel, telegram_id)
+        member = await asyncio.wait_for(
+            bot.get_chat_member(settings.required_channel, telegram_id),
+            timeout=8,
+        )
+    except TimeoutError:
+        logger.warning("Subscription check timed out for %s", telegram_id)
+        return False
     except Exception as exc:  # noqa: BLE001
         logger.warning("Cannot verify subscription for %s: %s", telegram_id, exc)
         return False
@@ -606,7 +613,8 @@ async def gate_accept_terms(
         return
 
     await UserPolicyRepository(session).accept_terms(user.id)
-    await user_service.activate_vpn_if_needed(user)
+    await session.commit()
+    await callback.answer("Спасибо")
 
     bot_info = await bot.get_me()
     text = (
@@ -619,4 +627,9 @@ async def gate_accept_terms(
         text,
         reply_markup=main_menu(is_admin=settings.is_admin(callback.from_user.id)),
     )
-    await callback.answer("Спасибо")
+    try:
+        await user_service.activate_vpn_if_needed(user)
+        await session.commit()
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Accepted terms for %s, but VPN activation failed: %s", callback.from_user.id, exc)
+        await session.rollback()

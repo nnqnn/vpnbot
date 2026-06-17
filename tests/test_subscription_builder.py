@@ -688,7 +688,7 @@ def test_xray_json_response_can_set_profile_web_page_url_to_channel() -> None:
             }
         }
     }
-    profile = replace(_profile(), profile_web_page_url="https://t.me/kvpn_public")
+    profile = replace(_profile(), profile_web_page_url="https://t.me/kvpnpublic")
 
     response = build_xray_json_subscription_response(
         snapshot=snapshot,
@@ -699,7 +699,7 @@ def test_xray_json_response_can_set_profile_web_page_url_to_channel() -> None:
     )
 
     assert response is not None
-    assert response.headers["profile-web-page-url"] == "https://t.me/kvpn_public"
+    assert response.headers["profile-web-page-url"] == "https://t.me/kvpnpublic"
 
 
 def test_xray_json_response_returns_empty_profile_list_without_entitlements() -> None:

@@ -97,7 +97,7 @@ class Settings(BaseSettings):
         default="kVPN: подписка обновляется автоматически.",
         alias="SUBSCRIPTION_ANNOUNCE_TEXT",
     )
-    subscription_announce_url: str = Field(default="https://t.me/kvpn_public", alias="SUBSCRIPTION_ANNOUNCE_URL")
+    subscription_announce_url: str = Field(default="https://t.me/kvpnpublic", alias="SUBSCRIPTION_ANNOUNCE_URL")
     subscription_profile_web_page_url: str = Field(default="", alias="SUBSCRIPTION_PROFILE_WEB_PAGE_URL")
     subscription_snapshot_path: Path = Field(
         default=Path("./logs/subscription_snapshot.json"),
@@ -124,7 +124,7 @@ class Settings(BaseSettings):
     log_level: str = Field(default="INFO", alias="LOG_LEVEL")
     log_dir: Path = Field(default=Path("./logs"), alias="LOG_DIR")
     required_channel: str = Field(default="@kvpnpublic", alias="REQUIRED_CHANNEL")
-    required_channel_url: str = Field(default="https://t.me/kvpn_public", alias="REQUIRED_CHANNEL_URL")
+    required_channel_url: str = Field(default="https://t.me/kvpnpublic", alias="REQUIRED_CHANNEL_URL")
     support_url: str = Field(default="https://t.me/kamilhateu", alias="SUPPORT_URL")
     rules_url: str = Field(
         default="https://telegra.ph/Pravila-servisa-kVPN-i-politika-konfidencialnosti-04-05",

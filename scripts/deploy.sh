@@ -196,6 +196,8 @@ upsert_env_value HYSTERIA2_STATS_URL http://127.0.0.1:9999
 upsert_env_value HYSTERIA2_STATS_SECRET ""
 upsert_env_value HYSTERIA2_STATS_SECRET_FILE /root/tgvpn-hysteria2-stats-secret.txt
 upsert_env_value HYSTERIA2_STATS_TIMEOUT_SECONDS 5
+upsert_env_value REQUIRED_CHANNEL @kvpnpublic
+upsert_env_value REQUIRED_CHANNEL_URL https://t.me/kvpnpublic
 upsert_env_value VLESS_PUBLIC_HOST 89.125.50.96
 upsert_env_value VLESS_PUBLIC_PORT 443
 upsert_env_value VLESS_SECURITY reality
